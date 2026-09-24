@@ -13,12 +13,16 @@ In any app (Word, a browser, Discord, Notepad), type `@@` and then the word as i
 | `@@becuz `      | `because `    |
 | `@@Restront `   | `Restaurant ` |
 
-A small popup next to the text shows other matches for a few seconds:
+Matches pop up next to the text **while you are still typing** the word:
 
-- **Ctrl+1 … Ctrl+5** swaps in that word
-- **Ctrl+0** puts back what you typed
+- **Space** or punctuation puts in the first match
+- **Enter** (or Tab) puts in the first match **and waits**, so a chat message is not sent yet. Press Enter again to send.
+- **Ctrl+1 … Ctrl+5** puts in that match instead
+- **Ctrl+0** (after a fix) puts back what you typed
 
-Punctuation, Enter and Tab also end the word, just like a space. Capitals carry over (`@@THRU` → `THROUGH`).
+The popup closes as soon as you keep typing, clicks, or switches window.
+
+Capitals carry over (`@@THRU` → `THROUGH`).
 
 SoundSpell sits with the hidden icons by the clock (the **^** arrow). Right-click it for:
 
@@ -49,4 +53,6 @@ Every dictionary word (50,000 common English words) gets a "sound key": `ph` and
 - `src/SoundSpell.cs`: the tray app, the keyboard watcher and the popup
 - `words.txt`: the word list, most common first
 - `build.ps1`, `install.ps1`, `uninstall.ps1`, `Install.cmd`: build and install
-- `test/`: spelling checks (`test/run.sh` with Mono on Linux/macOS, `test/run.ps1` on Windows)
+- `test/`: spelling checks (`test/run.sh` with Mono on Linux/macOS, `test/run.ps1` on Windows) and `test/e2e.ps1`, which types into Notepad on Windows to check the whole thing works
+
+Set the environment variable `SOUNDSPELL_LOG` to a file path to get a trace of what it sees and types.

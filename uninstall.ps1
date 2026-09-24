@@ -1,4 +1,4 @@
-# Removes SoundSpell. Her own word list in %APPDATA%\SoundSpell is kept.
+# Removes SoundSpell. Your own word list in %APPDATA%\SoundSpell is kept.
 $dest = Join-Path $env:LOCALAPPDATA 'Programs\SoundSpell'
 Get-Process SoundSpell -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 300

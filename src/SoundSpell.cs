@@ -1,7 +1,8 @@
 // SoundSpell: a tray app. Type @@ and a word spelled the way it sounds, then a
 // space (or punctuation, Enter, Tab), and the word is swapped for the real
 // spelling in whatever app you are typing in. A small popup lists other
-// matches: Ctrl+1..5 picks one, Ctrl+0 puts back what you typed.
+// matches while you type: Ctrl+1..5 picks one, Ctrl+0 puts back what you typed.
+// Enter after @@word only fixes the word; the next Enter goes through as usual.
 //
 // Written for C# 5 so the csc.exe that ships inside Windows can compile it.
 
@@ -120,7 +121,7 @@ namespace SoundSpell
         SpeechSynthesizer voice;
         FileSystemWatcher myWordsWatcher;
 
-        // Words of her own (names, places, school words) go first in the list.
+        // Your own words (names, places, school words) go first in the list.
         public static string MyWordsPath
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SoundSpell", "my-words.txt"); }
@@ -272,10 +273,11 @@ namespace SoundSpell
                 "    @@nesesary  ->  necessary\n" +
                 "    @@sykology  ->  psychology\n" +
                 "    @@wensday  ->  Wednesday\n\n" +
-                "A popup shows other matches for a few seconds:\n" +
-                "    Ctrl+1 to Ctrl+5 swaps in that word\n" +
+                "Matches show up while you type:\n" +
+                "    Space or punctuation puts in the first one\n" +
+                "    Enter puts it in and waits; press Enter again to send\n" +
+                "    Ctrl+1 to Ctrl+5 puts in that word instead\n" +
                 "    Ctrl+0 puts back what you typed\n\n" +
-                "Punctuation, Enter and Tab work in place of the space.\n" +
                 "Capitals carry over: @@Wensday gives Wednesday, @@THRU gives THROUGH.\n\n" +
                 "Turn on \"Read the word out loud\" to hear each fixed word.\n" +
                 "Put names and your own words in \"My words\" so they are found first.\n\n" +
