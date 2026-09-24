@@ -378,10 +378,19 @@ namespace SoundSpell
             if (nCode >= 0 && Enabled)
             {
                 int msg = wParam.ToInt32();
-                if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
+                var k = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
+                if (k.dwExtraInfo != Marker)
                 {
-                    var k = (Native.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
-                    if (k.dwExtraInfo != Marker)
+                    bool isDown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+                    // While our own typing is waiting to go out, hold the user's keys
+                    // back and replay them after it, so nothing lands in the middle.
+                    if (busy)
+                    {
+                        queued.Add(k);
+                        return new IntPtr(1);
+                    }
+                    if (k.vkCode < 256) held[k.vkCode] = isDown;
+                    if (isDown)
                     {
                         bool swallow = false;
                         try { swallow = OnKeyDown((int)k.vkCode, (int)k.scanCode); }
@@ -393,7 +402,57 @@ namespace SoundSpell
             return Native.CallNextHookEx(hook, nCode, wParam, lParam);
         }
 
-        static bool Down(int vk) { return (Native.GetAsyncKeyState(vk) & 0x8000) != 0; }
+        // Which keys are down, from the key events themselves (GetAsyncKeyState lags
+        // behind inside a low-level hook).
+        readonly bool[] held = new bool[256];
+        bool busy;
+        readonly List<Native.KBDLLHOOKSTRUCT> queued = new List<Native.KBDLLHOOKSTRUCT>();
+
+        bool Down(int vk)
+        {
+            if (vk == VK_CONTROL) return held[VK_LCONTROL] || held[VK_RCONTROL] || held[VK_CONTROL];
+            if (vk == VK_MENU) return held[VK_LMENU] || held[VK_RMENU] || held[VK_MENU];
+            if (vk == VK_SHIFT) return held[VK_LSHIFT] || held[VK_RSHIFT] || held[VK_SHIFT];
+            return held[vk];
+        }
+
+        // Keys sent from inside the hook callback get lost, so typing goes out just
+        // after it returns.
+        void SendLater(List<Native.INPUT> keys)
+        {
+            busy = true;
+            app.Post(delegate
+            {
+                try
+                {
+                    var up = ReleaseModifiers();
+                    Send(keys);
+                    RestoreModifiers(up);
+                }
+                finally
+                {
+                    busy = false;
+                    ReplayQueued();
+                }
+            });
+        }
+
+        void ReplayQueued()
+        {
+            if (queued.Count == 0) return;
+            var keys = new List<Native.INPUT>();
+            foreach (var k in queued)
+            {
+                uint flags = 0;
+                if ((k.flags & 0x01) != 0) flags |= Native.KEYEVENTF_EXTENDEDKEY;
+                if ((k.flags & 0x80) != 0) flags |= Native.KEYEVENTF_KEYUP;
+                var i = Key((ushort)k.vkCode, (ushort)k.scanCode, flags);
+                i.u.ki.dwExtraInfo = IntPtr.Zero; // goes through the hook again like any key
+                keys.Add(i);
+            }
+            queued.Clear();
+            Send(keys);
+        }
 
         static bool IsModifier(int vk)
         {
@@ -534,7 +593,7 @@ namespace SoundSpell
                 {
                     var keys = new List<Native.INPUT>();
                     if (termVk != 0) AddVk(keys, termVk); else AddText(keys, term);
-                    Send(keys);
+                    SendLater(keys);
                 }
                 inserted = m.Value;
                 termText = term;
@@ -547,13 +606,11 @@ namespace SoundSpell
         // Swap the typed @@word (and nothing after it) for `word`, then type `term`.
         void ReplaceTyped(Match m, string word, string term)
         {
-            var held = ReleaseModifiers();
             var keys = new List<Native.INPUT>();
             for (int i = 0; i < m.Value.Length; i++) AddVk(keys, VK_BACK);
             AddText(keys, word);
             if (term == " ") AddVk(keys, VK_SPACE); else AddText(keys, term);
-            Send(keys);
-            RestoreModifiers(held);
+            SendLater(keys);
             tail.Length = 0;
             inserted = word;
             termText = term;
@@ -561,14 +618,12 @@ namespace SoundSpell
 
         void Pick(string word)
         {
-            var held = ReleaseModifiers();
             var keys = new List<Native.INPUT>();
             int erase = inserted.Length + termText.Length;
             for (int i = 0; i < erase; i++) AddVk(keys, VK_BACK);
             AddText(keys, word);
             AddText(keys, termText);
-            Send(keys);
-            RestoreModifiers(held);
+            SendLater(keys);
             inserted = word;
             CloseAll();
             app.Post(delegate { app.Say(word); });
@@ -613,7 +668,7 @@ namespace SoundSpell
             return new Point(c.X + 12, c.Y + 20);
         }
 
-        static char Translate(int vk, int scan, IntPtr fg)
+        char Translate(int vk, int scan, IntPtr fg)
         {
             var state = new byte[256];
             foreach (int m in new[] { VK_SHIFT, VK_LSHIFT, VK_RSHIFT, VK_CONTROL, VK_LCONTROL, VK_RCONTROL, VK_MENU, VK_LMENU, VK_RMENU })
@@ -628,23 +683,23 @@ namespace SoundSpell
         }
 
         // Held Ctrl/Alt/Win/Shift would turn our Backspaces into shortcuts; lift them while we type.
-        static List<int> ReleaseModifiers()
+        List<int> ReleaseModifiers()
         {
-            var held = new List<int>();
+            var up = new List<int>();
             foreach (int m in new[] { VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN, VK_LSHIFT, VK_RSHIFT })
-                if (Down(m)) held.Add(m);
-            if (held.Count == 0) return held;
+                if (held[m]) up.Add(m);
+            if (up.Count == 0) return up;
             var keys = new List<Native.INPUT>();
-            foreach (int m in held) keys.Add(Key((ushort)m, 0, Native.KEYEVENTF_KEYUP));
+            foreach (int m in up) keys.Add(Key((ushort)m, 0, Native.KEYEVENTF_KEYUP));
             Send(keys);
-            return held;
+            return up;
         }
 
-        static void RestoreModifiers(List<int> held)
+        static void RestoreModifiers(List<int> up)
         {
-            if (held.Count == 0) return;
+            if (up.Count == 0) return;
             var keys = new List<Native.INPUT>();
-            foreach (int m in held) if (m != VK_LMENU && m != VK_RMENU && m != VK_LWIN && m != VK_RWIN) keys.Add(Key((ushort)m, 0, 0));
+            foreach (int m in up) if (m != VK_LMENU && m != VK_RMENU && m != VK_LWIN && m != VK_RWIN) keys.Add(Key((ushort)m, 0, 0));
             if (keys.Count > 0) Send(keys);
         }
 
@@ -872,7 +927,7 @@ namespace SoundSpell
         public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
         public const uint INPUT_KEYBOARD = 1;
-        public const uint KEYEVENTF_KEYUP = 0x2, KEYEVENTF_UNICODE = 0x4;
+        public const uint KEYEVENTF_EXTENDEDKEY = 0x1, KEYEVENTF_KEYUP = 0x2, KEYEVENTF_UNICODE = 0x4;
 
         [StructLayout(LayoutKind.Sequential)]
         public struct KBDLLHOOKSTRUCT { public uint vkCode, scanCode, flags, time; public IntPtr dwExtraInfo; }
