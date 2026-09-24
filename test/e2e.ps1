@@ -5,6 +5,8 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 
 Get-Process SoundSpell, notepad -ErrorAction SilentlyContinue | Stop-Process -Force
+$env:SOUNDSPELL_LOG = Join-Path $env:TEMP 'soundspell-e2e.log'
+Remove-Item $env:SOUNDSPELL_LOG -ErrorAction SilentlyContinue
 $app = Start-Process $Exe -PassThru
 Start-Sleep -Seconds 3   # word list loads
 
@@ -51,4 +53,5 @@ $results = @(
 )
 
 Stop-Process $app.Id -Force
+if ($results -contains $false -and (Test-Path $env:SOUNDSPELL_LOG)) { Write-Host '--- SoundSpell log ---'; Get-Content $env:SOUNDSPELL_LOG }
 if ($results -contains $false) { exit 1 }

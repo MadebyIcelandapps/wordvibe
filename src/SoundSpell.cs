@@ -385,7 +385,7 @@ namespace SoundSpell
                     {
                         bool swallow = false;
                         try { swallow = OnKeyDown((int)k.vkCode, (int)k.scanCode); }
-                        catch (Exception) { tail.Length = 0; }
+                        catch (Exception e) { tail.Length = 0; if (Log.On) Log.Write("error " + e); }
                         if (swallow) return new IntPtr(1);
                     }
                 }
@@ -403,6 +403,7 @@ namespace SoundSpell
 
         bool OnKeyDown(int vk, int scan)
         {
+            if (Log.On) Log.Write("key " + vk.ToString("X2") + " ctrl=" + Down(VK_CONTROL) + " popup=" + popupUp + " choices=" + (choices != null) + " tail=[" + tail + "]");
             if (IsModifier(vk)) return false;
 
             IntPtr fg = Native.GetForegroundWindow();
@@ -676,7 +677,8 @@ namespace SoundSpell
         static void Send(List<Native.INPUT> keys)
         {
             if (keys.Count == 0) return;
-            Native.SendInput((uint)keys.Count, keys.ToArray(), Marshal.SizeOf(typeof(Native.INPUT)));
+            uint sent = Native.SendInput((uint)keys.Count, keys.ToArray(), Marshal.SizeOf(typeof(Native.INPUT)));
+            if (Log.On) Log.Write("SendInput " + keys.Count + " -> " + sent + " err " + Marshal.GetLastWin32Error() + " size " + Marshal.SizeOf(typeof(Native.INPUT)));
         }
     }
 
@@ -810,6 +812,17 @@ namespace SoundSpell
             Speller sp = app.Speller;
             if (sp == null) { list.Items.Add("(still loading the word list)"); return; }
             foreach (string s in sp.Suggest(word, 8)) list.Items.Add(s);
+        }
+    }
+
+    // Set SOUNDSPELL_LOG to a file path to trace what the key watcher sees and does.
+    static class Log
+    {
+        static readonly string Path = Environment.GetEnvironmentVariable("SOUNDSPELL_LOG");
+        public static readonly bool On = !string.IsNullOrEmpty(Path);
+        public static void Write(string line)
+        {
+            try { File.AppendAllText(Path, DateTime.Now.ToString("HH:mm:ss.fff ") + line + Environment.NewLine); } catch (Exception) { }
         }
     }
 
