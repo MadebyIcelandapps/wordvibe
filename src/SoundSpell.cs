@@ -636,7 +636,7 @@ namespace SoundSpell
             liveWord = null; liveFound = null; liveFoundFor = null;
             if (!popupUp) return;
             popupUp = false;
-            app.Post(delegate { if (popup != null) popup.Hide(); });
+            app.Post(delegate { if (popup != null) popup.HideNow(); });
         }
 
         void ShowPopup(List<string> found, int current, string typed, string footer)
@@ -733,7 +733,12 @@ namespace SoundSpell
         {
             if (keys.Count == 0) return;
             uint sent = Native.SendInput((uint)keys.Count, keys.ToArray(), Marshal.SizeOf(typeof(Native.INPUT)));
-            if (Log.On) Log.Write("SendInput " + keys.Count + " -> " + sent + " err " + Marshal.GetLastWin32Error() + " size " + Marshal.SizeOf(typeof(Native.INPUT)));
+            if (Log.On)
+            {
+                var title = new StringBuilder(128);
+                Native.GetWindowText(Native.GetForegroundWindow(), title, title.Capacity);
+                Log.Write("SendInput " + keys.Count + " -> " + sent + " into [" + title + "]");
+            }
         }
     }
 
@@ -754,11 +759,12 @@ namespace SoundSpell
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            TopMost = true;
+            // Not TopMost = true: WinForms then activates the window when it shows,
+            // and the fixed word gets typed into the popup instead of the app.
             BackColor = Color.FromArgb(32, 33, 36);
             DoubleBuffered = true;
             hideTimer.Interval = 15000;
-            hideTimer.Tick += delegate { hideTimer.Stop(); Hide(); if (TimedOut != null) TimedOut(this, EventArgs.Empty); };
+            hideTimer.Tick += delegate { hideTimer.Stop(); HideNow(); if (TimedOut != null) TimedOut(this, EventArgs.Empty); };
         }
 
         protected override bool ShowWithoutActivation { get { return true; } }
@@ -776,6 +782,18 @@ namespace SoundSpell
 
         public event EventHandler TimedOut;
 
+        public void HideNow()
+        {
+            hideTimer.Stop();
+            if (IsHandleCreated) Native.ShowWindow(Handle, 0); // SW_HIDE
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x0021) { m.Result = new IntPtr(3); return; } // WM_MOUSEACTIVATE: MA_NOACTIVATE
+            base.WndProc(ref m);
+        }
+
         public void ShowChoices(List<string> list, int current, string footer, Point at)
         {
             items = list; this.current = current; this.footer = footer;
@@ -789,9 +807,10 @@ namespace SoundSpell
             Rectangle screen = Screen.FromPoint(at).WorkingArea;
             int x = Math.Min(Math.Max(at.X, screen.Left), screen.Right - w);
             int y = at.Y + h > screen.Bottom ? at.Y - h - 30 : at.Y;
-            Bounds = new Rectangle(x, y, w, h);
+            // Shown with plain Win32 calls that never take focus from the app being typed in.
+            Native.SetWindowPos(Handle, new IntPtr(-1), x, y, w, h, 0x0010 | 0x0040); // HWND_TOPMOST, NOACTIVATE | SHOWWINDOW
             Invalidate();
-            if (!Visible) Show();
+            Update();
             hideTimer.Stop();
             hideTimer.Start();
         }
@@ -974,5 +993,8 @@ namespace SoundSpell
         [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint threadId, ref GUITHREADINFO info);
         [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref POINT p);
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
+        [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
     }
 }

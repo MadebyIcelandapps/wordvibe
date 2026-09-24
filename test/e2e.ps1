@@ -16,6 +16,7 @@ function Type-Slowly([string]$keys) {
     $i = 0
     while ($i -lt $keys.Length) {
         if ($keys[$i] -eq '{') { $end = $keys.IndexOf('}', $i); $k = $keys.Substring($i, $end - $i + 1); $i = $end + 1 }
+        elseif ($keys[$i] -eq '^') { $k = $keys.Substring($i, 2); $i += 2 }   # Ctrl+key goes as one
         else { $k = [string]$keys[$i]; $i++ }
         [System.Windows.Forms.SendKeys]::SendWait($k)
         Start-Sleep -Milliseconds 90
