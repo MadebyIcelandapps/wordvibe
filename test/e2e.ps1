@@ -11,14 +11,41 @@ $app = Start-Process $Exe -PassThru
 Start-Sleep -Seconds 3   # word list loads
 
 $shell = New-Object -ComObject WScript.Shell
+
+# Types like a keyboard: plain key presses with scan codes, one at a time
+# (SendKeys does its own juggling of key state, which is not what a person does).
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices; using System.Threading;
+public static class Kbd {
+  [StructLayout(LayoutKind.Sequential)] struct MI { public int dx, dy; public uint md, fl, t; public IntPtr ex; }
+  [StructLayout(LayoutKind.Sequential)] struct KI { public ushort vk, sc; public uint fl, t; public IntPtr ex; }
+  [StructLayout(LayoutKind.Explicit)] struct U { [FieldOffset(0)] public MI mi; [FieldOffset(0)] public KI ki; }
+  [StructLayout(LayoutKind.Sequential)] struct IN { public uint type; public U u; }
+  [DllImport("user32.dll")] static extern uint SendInput(uint n, IN[] i, int s);
+  [DllImport("user32.dll")] static extern uint MapVirtualKey(uint c, uint t);
+  [DllImport("user32.dll")] static extern short VkKeyScan(char c);
+  static void Key(int vk, bool up) {
+    var i = new IN(); i.type = 1; i.u.ki.vk = (ushort)vk; i.u.ki.sc = (ushort)MapVirtualKey((uint)vk, 0); i.u.ki.fl = up ? 2u : 0u;
+    SendInput(1, new[] { i }, Marshal.SizeOf(typeof(IN))); Thread.Sleep(15);
+  }
+  public static void Press(int vk, bool shift, bool ctrl) {
+    if (ctrl) Key(0x11, false); if (shift) Key(0x10, false);
+    Key(vk, false); Key(vk, true);
+    if (shift) Key(0x10, true); if (ctrl) Key(0x11, true);
+  }
+  public static void Char(char c) { short r = VkKeyScan(c); Press(r & 0xFF, (r & 0x100) != 0, false); }
+}
+'@
+
 function Type-Slowly([string]$keys) {
-    # One key at a time with a pause, about as fast as quick typing.
     $i = 0
     while ($i -lt $keys.Length) {
-        if ($keys[$i] -eq '{') { $end = $keys.IndexOf('}', $i); $k = $keys.Substring($i, $end - $i + 1); $i = $end + 1 }
-        elseif ($keys[$i] -eq '^') { $k = $keys.Substring($i, 2); $i += 2 }   # Ctrl+key goes as one
-        else { $k = [string]$keys[$i]; $i++ }
-        [System.Windows.Forms.SendKeys]::SendWait($k)
+        if ($keys[$i] -eq '{') {
+            $end = $keys.IndexOf('}', $i); $name = $keys.Substring($i + 1, $end - $i - 1); $i = $end + 1
+            if ($name -eq 'ENTER') { [Kbd]::Press(0x0D, $false, $false) }
+        }
+        elseif ($keys[$i] -eq '^') { [Kbd]::Press([int][char]$keys[$i + 1], $false, $true); $i += 2 }
+        else { [Kbd]::Char($keys[$i]); $i++ }
         Start-Sleep -Milliseconds 90
     }
 }
