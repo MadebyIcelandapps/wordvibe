@@ -319,8 +319,18 @@ namespace SoundSpell
         List<string> choices;
         string original;      // what was typed, without @@
         string inserted;      // what is on screen now in place of @@word
-        string termText;      // the character that ended the word, as it is on screen ("" for none)
-        DateTime choicesUntil;
+        string termText;      // the key that ended the word, as it is on screen ("" when held back)
+
+        // Suggestions shown while @@word is still being typed.
+        string liveWord;
+        List<string> liveFound;
+        string liveFoundFor;  // the word liveFound was looked up for
+        bool popupUp;
+
+        // Lookups run on a worker so typing never waits for them.
+        readonly object lookupLock = new object();
+        readonly AutoResetEvent lookupWake = new AutoResetEvent(false);
+        string lookupWanted;
 
         public bool Enabled = true;
         public bool AutoReplace = true;
@@ -341,7 +351,7 @@ namespace SoundSpell
                 if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
                 {
                     tail.Length = 0;
-                    if (choices != null) ClearChoices();
+                    if (popupUp) CloseAll();
                 }
             }
             return Native.CallNextHookEx(mouseHook, nCode, wParam, lParam);
@@ -351,6 +361,9 @@ namespace SoundSpell
         {
             hook = Native.SetWindowsHookEx(WH_KEYBOARD_LL, proc, Native.GetModuleHandle(null), 0);
             mouseHook = Native.SetWindowsHookEx(WH_MOUSE_LL, mouseProc, Native.GetModuleHandle(null), 0);
+            var worker = new Thread(LookupLoop);
+            worker.IsBackground = true;
+            worker.Start();
         }
 
         public void Stop()
@@ -393,91 +406,156 @@ namespace SoundSpell
             if (IsModifier(vk)) return false;
 
             IntPtr fg = Native.GetForegroundWindow();
-            if (fg != lastWindow) { lastWindow = fg; tail.Length = 0; if (choices != null) ClearChoices(); }
+            if (fg != lastWindow) { lastWindow = fg; tail.Length = 0; CloseAll(); }
 
             bool ctrl = Down(VK_CONTROL), alt = Down(VK_MENU), win = Down(VK_LWIN) || Down(VK_RWIN);
             bool altGr = ctrl && alt && Down(VK_RMENU);
 
-            // Ctrl+digit while the popup is up picks another word.
-            if (choices != null)
+            // Ctrl+digit while the popup is up picks a word.
+            if (popupUp && ctrl && !alt && !win && vk >= '0' && vk <= '9')
             {
-                if (DateTime.UtcNow < choicesUntil && ctrl && !alt && !win && vk >= '0' && vk <= '9')
+                int n = vk - '0';
+                if (choices != null && (n == 0 || n <= choices.Count))
                 {
-                    int n = vk - '0';
-                    if (n == 0 || n <= choices.Count)
-                    {
-                        Pick(n == 0 ? original : choices[n - 1]);
-                        return true;
-                    }
+                    Pick(n == 0 ? original : choices[n - 1]);
+                    return true;
                 }
-                ClearChoices();
+                Match live = Trigger.Match(tail.ToString());
+                string liveTyped = live.Success ? live.Groups[1].Value.TrimEnd('\'') : null;
+                if (choices == null && liveTyped != null && liveTyped == liveFoundFor && n >= 1 && n <= liveFound.Count)
+                {
+                    // Picked while still typing: that is the final choice.
+                    string word = liveFound[n - 1];
+                    ReplaceTyped(live, word, "");
+                    CloseAll();
+                    app.Post(delegate { app.Say(word); });
+                    return true;
+                }
             }
 
-            if ((ctrl || alt || win) && !altGr) { tail.Length = 0; return false; }
+            // Anything else typed means the last fix is settled.
+            if (choices != null) CloseAll();
 
-            if (vk == VK_BACK) { if (tail.Length > 0) tail.Length--; return false; }
-            if (vk == VK_RETURN) return TryFix("\n", VK_RETURN);
-            if (vk == VK_TAB) return TryFix("\t", VK_TAB);
+            if ((ctrl || alt || win) && !altGr) { tail.Length = 0; CloseAll(); return false; }
+
+            if (vk == VK_BACK)
+            {
+                if (tail.Length > 0) tail.Length--;
+                UpdateLive();
+                return false;
+            }
+            if (vk == VK_RETURN) return TryFix("", VK_RETURN);
+            if (vk == VK_TAB) return TryFix("", VK_TAB);
             if (vk == VK_SPACE) return TryFix(" ", VK_SPACE);
 
             char c = Translate(vk, scan, fg);
-            if (c == '\0') { tail.Length = 0; return false; } // arrows, Home, Esc, dead keys...
+            if (c == '\0') { tail.Length = 0; CloseAll(); return false; } // arrows, Home, Esc, dead keys...
 
             if (char.IsLetter(c) || c == '\'' || c == '@')
             {
                 tail.Append(c);
                 if (tail.Length > 64) tail.Remove(0, tail.Length - 64);
+                UpdateLive();
                 return false;
             }
-            if (char.IsControl(c)) { tail.Length = 0; return false; }
+            if (char.IsControl(c)) { tail.Length = 0; CloseAll(); return false; }
             return TryFix(c.ToString(), 0);
         }
 
+        // While @@word is being typed, look it up in the background and show the matches.
+        void UpdateLive()
+        {
+            Match m = Trigger.Match(tail.ToString());
+            string word = m.Success ? m.Groups[1].Value.TrimEnd('\'') : "";
+            if (word.Length < 2)
+            {
+                liveWord = null; liveFound = null; liveFoundFor = null;
+                if (popupUp) CloseAll();
+                return;
+            }
+            liveWord = word;
+            lock (lookupLock) lookupWanted = word;
+            lookupWake.Set();
+        }
+
+        void LookupLoop()
+        {
+            while (true)
+            {
+                lookupWake.WaitOne();
+                string word;
+                lock (lookupLock) { word = lookupWanted; lookupWanted = null; }
+                Speller sp = app.Speller;
+                if (word == null || sp == null) continue;
+                List<string> found = sp.Suggest(word, 5);
+                app.Post(delegate
+                {
+                    if (word != liveWord || choices != null || found.Count == 0) return; // typing moved on
+                    liveFound = found;
+                    liveFoundFor = word;
+                    ShowPopup(found, 0, word, AutoReplace
+                        ? "Space or Enter: use 1      Ctrl+number: pick"
+                        : "Ctrl+number: put that word in");
+                });
+            }
+        }
+
         // The word just ended with `term`. If it was @@word, swap it.
+        // Enter and Tab are held back, so fixing a word never sends a message
+        // or leaves the box; the next Enter does that as usual.
         bool TryFix(string term, int termVk)
         {
             Match m = Trigger.Match(tail.ToString());
             tail.Length = 0;
-            if (!m.Success) return false;
+            string word = m.Success ? m.Groups[1].Value.TrimEnd('\'') : "";
+            List<string> found = word.Length > 0 && word == liveFoundFor ? liveFound : null;
+            liveWord = null; liveFound = null; liveFoundFor = null;
+            if (word.Length == 0) { CloseAll(); return false; }
             Speller sp = app.Speller;
-            if (sp == null) return false; // still loading the word list
-
-            string word = m.Groups[1].Value.TrimEnd('\'');
-            if (word.Length == 0) return false;
-            List<string> found = sp.Suggest(word, 5);
-            if (found.Count == 0) return false;
-
-            int typedLen = m.Value.Length; // @@ + word as typed
-            var held = ReleaseModifiers();
-            var keys = new List<Native.INPUT>();
-            if (AutoReplace)
-            {
-                for (int i = 0; i < typedLen; i++) AddVk(keys, VK_BACK);
-                AddText(keys, found[0]);
-                inserted = found[0];
-            }
-            else inserted = m.Value;
-            Send(keys);
-            RestoreModifiers(held);
-
-            // Put the key that ended the word back. In suggest-only mode, Enter is
-            // held back so the message is not sent before a word is picked.
-            termText = term;
-            if (!AutoReplace && termVk == VK_RETURN) termText = "";
-            else
-            {
-                keys = new List<Native.INPUT>();
-                if (termVk != 0) AddVk(keys, termVk); else AddText(keys, term);
-                Send(keys);
-            }
-            if (termVk == VK_RETURN && AutoReplace) termText = null; // the line is gone; no swapping after it
+            if (found == null && sp != null) found = sp.Suggest(word, 5);
+            if (found == null || found.Count == 0) { CloseAll(); return false; }
 
             original = word;
-            choices = termText == null ? null : found;
-            choicesUntil = DateTime.UtcNow.AddSeconds(8);
-            ShowPopup(found, AutoReplace ? 1 : 0, word, termText != null);
-            if (AutoReplace) { string said = found[0]; app.Post(delegate { app.Say(said); }); }
+            if (AutoReplace)
+            {
+                ReplaceTyped(m, found[0], term);
+                choices = found;
+                ShowPopup(found, 1, word, termVk == VK_RETURN
+                    ? "Enter: send      Ctrl+number: pick      Ctrl+0: keep \"" + word + "\""
+                    : "Ctrl+number: pick      Ctrl+0: keep \"" + word + "\"");
+                string said = found[0];
+                app.Post(delegate { app.Say(said); });
+            }
+            else
+            {
+                // Only suggesting: leave the text, put the key back unless it was Enter/Tab.
+                if (term.Length > 0)
+                {
+                    var keys = new List<Native.INPUT>();
+                    if (termVk != 0) AddVk(keys, termVk); else AddText(keys, term);
+                    Send(keys);
+                }
+                inserted = m.Value;
+                termText = term;
+                choices = found;
+                ShowPopup(found, 0, word, "Ctrl+number: put that word in");
+            }
             return true;
+        }
+
+        // Swap the typed @@word (and nothing after it) for `word`, then type `term`.
+        void ReplaceTyped(Match m, string word, string term)
+        {
+            var held = ReleaseModifiers();
+            var keys = new List<Native.INPUT>();
+            for (int i = 0; i < m.Value.Length; i++) AddVk(keys, VK_BACK);
+            AddText(keys, word);
+            if (term == " ") AddVk(keys, VK_SPACE); else AddText(keys, term);
+            Send(keys);
+            RestoreModifiers(held);
+            tail.Length = 0;
+            inserted = word;
+            termText = term;
         }
 
         void Pick(string word)
@@ -487,34 +565,34 @@ namespace SoundSpell
             int erase = inserted.Length + termText.Length;
             for (int i = 0; i < erase; i++) AddVk(keys, VK_BACK);
             AddText(keys, word);
-            if (termText != "\n" && termText != "\t") AddText(keys, termText);
+            AddText(keys, termText);
             Send(keys);
-            if (termText == "\n" || termText == "\t")
-            {
-                keys = new List<Native.INPUT>();
-                AddVk(keys, termText == "\n" ? VK_RETURN : VK_TAB);
-                Send(keys);
-            }
             RestoreModifiers(held);
             inserted = word;
-            ClearChoices();
+            CloseAll();
             app.Post(delegate { app.Say(word); });
         }
 
-        void ClearChoices()
+        void CloseAll()
         {
             choices = null;
+            original = null;
+            liveWord = null; liveFound = null; liveFoundFor = null;
+            if (!popupUp) return;
+            popupUp = false;
             app.Post(delegate { if (popup != null) popup.Hide(); });
         }
 
-        void ShowPopup(List<string> found, int current, string typed, bool canPick)
+        void ShowPopup(List<string> found, int current, string typed, string footer)
         {
+            popupUp = true;
             Point at = CaretPoint();
             var list = new List<string>(found);
             app.Post(delegate
             {
-                if (popup == null || popup.IsDisposed) popup = new Popup();
-                popup.ShowChoices(list, current, typed, canPick, at);
+                if (!popupUp) return;
+                if (popup == null || popup.IsDisposed) { popup = new Popup(); popup.TimedOut += delegate { CloseAll(); }; }
+                popup.ShowChoices(list, current, footer, at);
             });
         }
 
@@ -608,8 +686,7 @@ namespace SoundSpell
         readonly System.Windows.Forms.Timer hideTimer = new System.Windows.Forms.Timer();
         List<string> items = new List<string>();
         int current;
-        string typed = "";
-        bool canPick;
+        string footer = "";
         // Verdana: wide letters that are hard to mix up (b/d, I/l), easier to read with dyslexia.
         readonly Font font = new Font("Verdana", 13f);
         readonly Font small = new Font("Verdana", 9f);
@@ -623,8 +700,8 @@ namespace SoundSpell
             TopMost = true;
             BackColor = Color.FromArgb(32, 33, 36);
             DoubleBuffered = true;
-            hideTimer.Interval = 8000;
-            hideTimer.Tick += delegate { hideTimer.Stop(); Hide(); };
+            hideTimer.Interval = 15000;
+            hideTimer.Tick += delegate { hideTimer.Stop(); Hide(); if (TimedOut != null) TimedOut(this, EventArgs.Empty); };
         }
 
         protected override bool ShowWithoutActivation { get { return true; } }
@@ -640,16 +717,18 @@ namespace SoundSpell
             }
         }
 
-        public void ShowChoices(List<string> list, int current, string typed, bool canPick, Point at)
+        public event EventHandler TimedOut;
+
+        public void ShowChoices(List<string> list, int current, string footer, Point at)
         {
-            items = list; this.current = current; this.typed = typed; this.canPick = canPick;
+            items = list; this.current = current; this.footer = footer;
             int w = 220;
             using (var g = CreateGraphics())
             {
                 foreach (string s in items) w = Math.Max(w, (int)g.MeasureString(s, font).Width + 100);
-                w = Math.Max(w, (int)g.MeasureString("Ctrl+0 keep \"" + typed + "\"", small).Width + 30);
+                w = Math.Max(w, (int)g.MeasureString(footer, small).Width + 24);
             }
-            int h = 12 + items.Count * Row + (canPick ? 26 : 0);
+            int h = 12 + items.Count * Row + 26;
             Rectangle screen = Screen.FromPoint(at).WorkingArea;
             int x = Math.Min(Math.Max(at.X, screen.Left), screen.Right - w);
             int y = at.Y + h > screen.Bottom ? at.Y - h - 30 : at.Y;
@@ -671,14 +750,13 @@ namespace SoundSpell
                 bool on = i + 1 == current;
                 if (on) using (var b = new SolidBrush(Color.FromArgb(38, 79, 120))) g.FillRectangle(b, 4, y, Width - 8, Row - 2);
                 using (var dim = new SolidBrush(Color.FromArgb(160, 165, 175)))
-                    g.DrawString(canPick ? "Ctrl+" + (i + 1) : (i + 1).ToString(), small, dim, 10, y + 7);
+                    g.DrawString("Ctrl+" + (i + 1), small, dim, 10, y + 7);
                 using (var fg = new SolidBrush(on ? Color.White : Color.FromArgb(230, 232, 236)))
                     g.DrawString(items[i], font, fg, 72, y + 3);
                 y += Row;
             }
-            if (canPick)
-                using (var dim = new SolidBrush(Color.FromArgb(150, 155, 165)))
-                    g.DrawString("Ctrl+0 keep \"" + typed + "\"", small, dim, 10, y + 4);
+            using (var dim = new SolidBrush(Color.FromArgb(160, 165, 175)))
+                g.DrawString(footer, small, dim, 10, y + 5);
         }
 
         protected override void Dispose(bool disposing)

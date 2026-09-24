@@ -17,6 +17,8 @@ jobs:
         run: ./test/run.ps1
       - name: Build SoundSpell.exe
         run: ./build.ps1
+      - name: Try it in Notepad
+        run: ./test/e2e.ps1
       - name: Package
         run: |
           New-Item -ItemType Directory pkg | Out-Null
