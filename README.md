@@ -30,7 +30,7 @@ SoundSpell sits with the hidden icons by the clock (the **^** arrow). Right-clic
 
 ## Install (a few seconds, no admin rights)
 
-1. Download this `soundspell` folder (or the **SoundSpell** zip from the latest *soundspell* GitHub Actions run).
+1. Download this repository as a zip (**Code → Download ZIP**), or the **SoundSpell** zip from the latest *build* GitHub Actions run, which has the program already built.
 2. Double-click **`Install.cmd`**.
 
 It is running now, and it starts with Windows from here on. It builds itself with the C# compiler that is already part of Windows 10 and 11, so nothing is downloaded. If the zip already has `SoundSpell.exe`, that file is used.

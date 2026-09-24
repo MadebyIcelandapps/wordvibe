@@ -1,0 +1,28 @@
+# Builds SoundSpell on real Windows (checks it compiles with the csc that ships
+# in Windows), runs the spelling checks, and uploads a ready-to-install zip.
+name: build
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Spelling checks
+        run: ./test/run.ps1
+      - name: Build SoundSpell.exe
+        run: ./build.ps1
+      - name: Package
+        run: |
+          New-Item -ItemType Directory pkg | Out-Null
+          Copy-Item SoundSpell.exe, Install.cmd, install.ps1, uninstall.ps1, build.ps1, words.txt, README.md pkg
+          Copy-Item src pkg -Recurse
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SoundSpell
+          path: pkg
