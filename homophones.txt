@@ -1,0 +1,75 @@
+# Words that sound the same. One group per line: word: meaning | word: meaning
+# Optional [after: a, b] lists words that usually come just before that word;
+# it only nudges the order, it never hides a choice.
+there: in or at that place [after: over, in, out, up, down, from, here, go, went, get, got, is, was, be, been, and] | their: belongs to them [after: of, for, with, all, both, at, on, by, into, lost, love, did, do, does] | they're: they are
+your: belongs to you [after: of, for, with, in, on, at, by, love, thanks, is, did, do] | you're: you are
+its: belongs to it [after: of, on, in, at, by, lost, has, and] | it's: it is
+to: towards, or part of a verb (to go) | too: also, or more than enough [after: me, you, him, her, us, them, it, way, much, many, far, late, early, big, small, hot, cold] | two: the number 2
+where: what place [after: from, and, but, know, knew, see, ask, asked, wonder, is, that] | wear: put on clothes [after: to, will, would, could, can, not, i, you, we, they] | were: past of are [after: we, you, they, there, if, as] | we're: we are
+weather: rain, sun, wind [after: the, bad, good, nice, lovely, awful, cold, hot, this] | whether: if
+whose: belongs to who | who's: who is
+than: comparing (bigger than) [after: more, less, better, worse, rather, other, bigger, smaller, older, younger] | then: next, or at that time [after: and, but, since, until, just, only, so, now]
+here: this place [after: over, in, come, came, from, right, out] | hear: listen with your ears [after: to, can, could, cant, didnt, did, will, i, you, we, they]
+know: understand [after: i, you, we, they, dont, didnt, do, did, to, let] | no: not yes | now: at this time
+knew: past of know [after: i, you, we, they, he, she, never, always] | new: not old [after: a, the, brand, my, your, our, their, something]
+right: correct, or not left [after: all, alright, thats, the, turn, on, your] | write: put words down [after: to, will, can, could, i, you, we, they] | rite: a ceremony
+buy: pay for [after: to, will, can, could, i, you, we, they, cant, didnt] | by: next to, or done by [after: stand, close, go, went, made, written] | bye: goodbye
+for: meant for [after: thanks, thank, wait, waiting, looking, look, ask, asked, time, good] | four: the number 4 | fore: at the front
+one: the number 1 | won: past of win [after: we, they, i, you, he, she, have, has, had, never]
+our: belongs to us [after: of, for, with, in, on, at, all, love] | hour: 60 minutes [after: an, half, the, one, every, per]
+hole: a gap [after: a, the, black, big, small, in] | whole: all of it [after: the, a, my, your, our, their, on]
+piece: a part [after: a, one, the, every, last] | peace: calm, no fighting [after: in, world, at, some, bit]
+past: gone by [after: the, in, walk, walked, go, went, drive, drove, half, quarter, just] | passed: went by, or did well in a test [after: i, you, we, they, he, she, have, has, had, just, time]
+accept: say yes to [after: to, will, i, you, we, they, cant, dont, please] | except: apart from [after: everyone, everything, all, nothing, anyone]
+affect: change something (verb) [after: to, will, can, could, it, doesnt, might, would] | effect: the result (noun) [after: an, the, side, no, any, in, special]
+break: smash, or a rest [after: a, the, lunch, tea, coffee, to, will, dont, take] | brake: stop a car [after: the, hand, emergency, hit, slam]
+meat: food from animals [after: the, some, eat, red, white, no] | meet: see someone [after: to, will, can, could, lets, nice, we, i, you, they] | mete: hand out
+week: 7 days [after: a, the, this, next, last, every, per, one, two] | weak: not strong [after: too, very, so, feel, feeling, felt, is, was]
+wait: stay until [after: to, can, cant, will, just, please, i, we] | weight: how heavy [after: the, my, your, lose, lost, put, gain, gained]
+wood: from trees [after: the, a, of, made, piece, bit] | would: past of will [after: i, you, we, they, he, she, it, that, who, which]
+threw: past of throw [after: i, you, we, they, he, she, it] | through: in one side and out the other [after: go, went, gone, get, got, walk, walked, come, came, all, half, way, read, look, looked]
+tail: back end of an animal [after: the, a, its, his, her, dogs, cats] | tale: a story [after: a, the, fairy, tall, old]
+sale: selling cheap [after: a, the, for, on, in, sales, big] | sail: travel on a boat [after: to, will, set, the, a]
+son: a boy child [after: my, your, his, her, our, their, a, the, only, eldest] | sun: the star in the sky [after: the, in, of, hot, sunny, some]
+plain: simple [after: a, the, just, so, very, too] | plane: aeroplane [after: a, the, on, by, off, catch, caught]
+stair: one step [after: the, a, top, bottom] | stare: look for a long time [after: to, dont, not, just, the]
+bear: the animal, or put up with [after: a, the, teddy, polar, brown, cant, to] | bare: with nothing on [after: the, feet, in, my, his, her]
+flower: part of a plant [after: a, the, pretty, lovely, pink, red, white] | flour: for baking [after: the, some, plain, self, of, bag]
+allowed: let (permitted) [after: not, is, are, isnt, arent, be, was, were, am] | aloud: out loud [after: read, reading, think, laugh, laughed, said, say]
+missed: did not catch, or felt sad without [after: i, you, we, they, he, she, it, just, have, has, had] | mist: light fog [after: the, a, morning, sea, in]
+guessed: made a guess [after: i, you, we, they, he, she, never, have, had] | guest: a visitor [after: a, the, special, our, my, house]
+board: flat wood, or get on [after: a, the, on, white, black, notice, surf, skate] | bored: fed up [after: so, very, im, i'm, get, got, feel, feeling, was, were, too]
+been: past of be [after: have, has, had, ive, weve, theyve, youve, never, always, just] | bean: a seed you eat [after: a, the, baked, green, coffee, jelly]
+cereal: breakfast food [after: the, some, bowl, my, of, eat] | serial: in a series [after: a, the, number, killer]
+cheap: low price [after: so, very, too, really, is, was, a] | cheep: a bird's sound
+chews: bites food [after: he, she, it, dog] | choose: pick [after: to, can, will, you, i, we, they, please]
+dear: loved, or costly [after: my, oh, very, so, too] | deer: the animal [after: a, the, red, some]
+die: stop living [after: to, will, might, could, dont] | dye: colour something [after: hair, the, some, to, tie]
+eye: you see with it [after: an, my, your, his, her, the, left, right, black, keep] | I: me | aye: yes
+fair: equal, or a funfair [after: not, so, that, is, was, the, a, fun, to, be] | fare: the price of a ticket [after: the, bus, train, taxi, air, a]
+grate: fireplace, or shred [after: the, a, to, fire] | great: very good [after: a, so, very, really, the, that, its, was]
+heel: back of the foot [after: the, high, my, your, a] | heal: get better [after: to, will, can, time]
+hi: hello | high: tall, far up [after: so, very, too, a, the, is, was, too]
+hire: rent, or give a job [after: to, for, car, bike, will] | higher: more high [after: much, even, a, the, go, get]
+lead: metal, or a dog's leash [after: the, a, dogs, on, of] | led: past of lead [after: he, she, it, they, we, i, was, were]
+loan: lend money [after: a, the, student, bank, on] | lone: alone [after: a, the]
+made: past of make [after: i, you, we, they, he, she, it, was, were, have, has, had, homemade] | maid: a cleaner [after: a, the, old, bride's]
+mail: post [after: the, e, email, by, junk, some] | male: a man or boy [after: a, the]
+pain: hurt [after: in, a, the, much, back, so, the] | pane: glass in a window [after: window, the, a]
+pair: two of something [after: a, the, one, new] | pear: the fruit [after: a, the, an, some] | pare: peel
+poor: no money [after: so, very, the, is, was, a] | pour: tip out liquid [after: to, will, can, just, please] | pore: tiny hole in skin
+quiet: not loud [after: so, very, be, keep, is, was, too, a] | quite: a bit, or completely [after: its, is, was, not, im, i'm]
+read: look at words [after: to, will, can, could, i, you, we, they, have, had] | red: the colour [after: the, a, bright, dark, is, was]
+role: a part you play [after: a, the, lead, main, key] | roll: turn over, or bread [after: a, the, to, rock, bread, sausage]
+sea: the ocean [after: the, a, by, at, in, irish] | see: look [after: to, can, cant, will, i, you, we, they, lets, see]
+seen: past of see [after: have, has, had, ive, never, been, be] | scene: a place, or part of a play [after: the, a, crime, this, that]
+sent: past of send [after: i, you, we, they, he, she, just, have, has, had, was] | scent: a smell [after: the, a, sweet, nice] | cent: 1/100 of a euro [after: a, one, per]
+sew: stitch [after: to, can, will, i] | so: very, or therefore | sow: plant seeds
+some: a few [after: have, get, got, want, need, buy, there's] | sum: a total, or maths [after: a, the, total, lump, maths]
+stationary: not moving [after: is, was, remained, stayed] | stationery: pens and paper [after: the, some, office, school]
+steal: take without asking [after: to, will, dont, didnt] | steel: a metal [after: the, stainless, of, made]
+tea: the drink [after: a, cup, of, the, some, make, hot] | tee: golf peg, or t-shirt [after: a, the, golf]
+waist: middle of your body [after: my, your, his, her, the, around] | waste: throw away [after: a, the, of, to, dont, food, time]
+way: road, or how [after: the, a, no, any, all, this, that, one, which] | weigh: find how heavy [after: to, you, i, will, can] | whey: milk liquid
+which: what one | witch: a magic woman [after: a, the, wicked, good, old]
+morning: early in the day [after: good, this, the, every, in, tomorrow, yesterday] | mourning: grieving [after: in, still, is, are]

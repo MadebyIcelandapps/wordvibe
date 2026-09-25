@@ -13,16 +13,33 @@ jobs:
         shell: powershell
     steps:
       - uses: actions/checkout@v4
+      - name: Version numbers match
+        run: |
+          $file = (Get-Content VERSION -Raw).Trim()
+          $code = (Select-String 'public const string Version = "(.*)"' src/Updater.cs).Matches[0].Groups[1].Value
+          if ($file -ne $code) { throw "VERSION says $file but src/Updater.cs says $code" }
       - name: Spelling checks
         run: ./test/run.ps1
       - name: Build SoundSpell.exe
         run: ./build.ps1
       - name: Try it in Notepad
         run: ./test/e2e.ps1
+      - name: Update from GitHub, then uninstall
+        run: |
+          ./update.ps1 -Ref ${{ github.sha }}
+          Start-Sleep 5
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\SoundSpell\SoundSpell.exe'
+          if (-not (Test-Path $exe)) { throw 'not installed' }
+          if (-not (Get-Process SoundSpell -ErrorAction SilentlyContinue)) { throw 'not running after install' }
+          & (Join-Path $env:LOCALAPPDATA 'Programs\SoundSpell\uninstall.ps1')
+          Start-Sleep 2
+          if (Test-Path $exe) { throw 'still there after uninstall' }
+          if (Get-Process SoundSpell -ErrorAction SilentlyContinue) { throw 'still running after uninstall' }
+          Write-Host 'update, install and uninstall ok'
       - name: Package
         run: |
           New-Item -ItemType Directory pkg | Out-Null
-          Copy-Item SoundSpell.exe, Install.cmd, install.ps1, uninstall.ps1, build.ps1, words.txt, README.md pkg
+          Copy-Item SoundSpell.exe, Install.cmd, install.ps1, uninstall.ps1, update.ps1, build.ps1, VERSION, words.txt, irish.txt, homophones.txt, README.md pkg
           Copy-Item src pkg -Recurse
       - uses: actions/upload-artifact@v4
         with:

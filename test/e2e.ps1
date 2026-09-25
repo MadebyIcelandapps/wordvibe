@@ -33,6 +33,7 @@ public static class Kbd {
     Key(vk, false); Key(vk, true);
     if (shift) Key(0x10, true); if (ctrl) Key(0x11, true);
   }
+  public static void Tap(int vk) { Key(vk, false); Key(vk, true); }
   public static void Char(char c) { short r = VkKeyScan(c); Press(r & 0xFF, (r & 0x100) != 0, false); }
 }
 '@
@@ -43,6 +44,7 @@ function Type-Slowly([string]$keys) {
         if ($keys[$i] -eq '{') {
             $end = $keys.IndexOf('}', $i); $name = $keys.Substring($i + 1, $end - $i - 1); $i = $end + 1
             if ($name -eq 'ENTER') { [Kbd]::Press(0x0D, $false, $false) }
+            if ($name -eq 'SHIFT2') { [Kbd]::Tap(0xA0); Start-Sleep -Milliseconds 120; [Kbd]::Tap(0xA0); Start-Sleep -Milliseconds 300 }
         }
         elseif ($keys[$i] -eq '^') { [Kbd]::Press([int][char]$keys[$i + 1], $false, $true); $i += 2 }
         else { [Kbd]::Char($keys[$i]); $i++ }
@@ -76,8 +78,23 @@ $results = @(
     (Check '@@Sykology.' "Psychology."),
     # Ctrl+0 puts back what was typed.
     (Check 'my @@frend ^0ok' "my frend ok"),
-    # No @@, nothing changes.
-    (Check 'plain nesesary words' "plain nesesary words")
+    # No @@, no shortcut: nothing changes.
+    (Check 'plain nesesary words' "plain nesesary words"),
+    # The shortcut: type the word, tap Shift twice.
+    (Check 'hello nesesary{SHIFT2}' "hello necessary"),
+    (Check 'see you on wensday.{SHIFT2}' "see you on Wednesday."),
+    # Shift for a capital letter is not a tap.
+    (Check 'Hello There' "Hello There"),
+    # Words that sound alike: the word before decides.
+    (Check 'the @@wether ' "the weather "),
+    (Check 'lost @@there bags' "lost their bags"),
+    # Irish and British spelling.
+    (Check 'my @@favrit ' "my favourite "),
+    (Check 'hi @@neev ' "hi Niamh "),
+    # Learning: pick the 2nd match twice, then it comes first by itself.
+    (Check '@@gril ^2' "girl "),
+    (Check '@@gril ^2' "girl "),
+    (Check '@@gril ' "girl ")
 )
 
 Stop-Process $app.Id -Force

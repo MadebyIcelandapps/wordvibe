@@ -17,10 +17,18 @@ namespace SoundSpell
 {
     public sealed class Speller
     {
-        private readonly string[] words;     // lower case, most common first
-        private readonly bool[] proper;      // written with a capital (Wednesday, English)
+        private readonly string[] words;     // lower case, fadas and accents removed, most common first
+        private readonly string[] display;   // as written in the list (Wednesday, Siobhán)
         private readonly string[][] keys;    // the distinct sound keys of each word
-        private readonly string[] saidKey;   // for words in SaidAs, the key of how they are said
+        private readonly string[] saidKey;   // for words with a said-as spelling, the key of how they are said
+        private readonly string[] saidAs;    // ...and that spelling itself
+        private readonly Dictionary<string, int> index = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        // What she picked before for a typed word: typed -> (word -> times).
+        private readonly Dictionary<string, Dictionary<string, int>> picks =
+            new Dictionary<string, Dictionary<string, int>>(StringComparer.Ordinal);
+
+        public Homophones Homophones = new Homophones();
 
         // Words whose spelling hides how they sound, written the way they are said.
         private static readonly string[] SaidAs = {
@@ -49,34 +57,46 @@ namespace SoundSpell
             "anemone=anemony", "epitome=epitomy", "recipe=ressipy", "catastrophe=katastrofy",
         };
 
+        // Each line: a word, optionally followed by "=how it sounds" (Niamh=neev).
+        // Lines starting with # are skipped.
         public Speller(TextReader wordList)
         {
             var list = new List<string>();
-            var caps = new List<bool>();
-            var index = new Dictionary<string, int>(StringComparer.Ordinal);
+            var shown = new List<string>();
+            var extra = new Dictionary<int, string>();
             string line;
             while ((line = wordList.ReadLine()) != null)
             {
                 line = line.Trim();
-                string lower = line.ToLowerInvariant();
-                if (lower.Length == 0 || index.ContainsKey(lower)) continue;
-                index[lower] = list.Count;
-                list.Add(lower);
-                caps.Add(char.IsUpper(line[0]));
+                if (line.Length == 0 || line[0] == '#') continue;
+                string said = null;
+                int eq = line.IndexOf('=');
+                if (eq > 0) { said = Plain(line.Substring(eq + 1)); line = line.Substring(0, eq).Trim(); }
+                string plain = Plain(line);
+                if (plain.Length == 0) continue;
+                int at;
+                if (!index.TryGetValue(plain, out at))
+                {
+                    at = list.Count;
+                    index[plain] = at;
+                    list.Add(plain);
+                    shown.Add(line);
+                }
+                if (!string.IsNullOrEmpty(said) && !extra.ContainsKey(at)) extra[at] = said;
             }
             words = list.ToArray();
-            proper = caps.ToArray();
+            display = shown.ToArray();
 
-            var extra = new Dictionary<int, string>();
             foreach (string pair in SaidAs)
             {
                 int eq = pair.IndexOf('=');
                 int at;
-                if (index.TryGetValue(pair.Substring(0, eq), out at)) extra[at] = pair.Substring(eq + 1);
+                if (index.TryGetValue(pair.Substring(0, eq), out at) && !extra.ContainsKey(at)) extra[at] = pair.Substring(eq + 1);
             }
 
             keys = new string[words.Length][];
             saidKey = new string[words.Length];
+            saidAs = new string[words.Length];
             var ks = new List<string>(4);
             for (int i = 0; i < words.Length; i++)
             {
@@ -86,6 +106,7 @@ namespace SoundSpell
                 string said;
                 if (extra.TryGetValue(i, out said))
                 {
+                    saidAs[i] = said;
                     saidKey[i] = SoundKey(said, false);
                     AddKey(ks, saidKey[i]);
                     AddKey(ks, SoundKey(said, true));
@@ -94,16 +115,95 @@ namespace SoundSpell
             }
         }
 
-        private static void AddKey(List<string> ks, string k) { if (!ks.Contains(k)) ks.Add(k); }
+        // The full dictionary: her own words first, then everyday words, with Irish
+        // names and places slotted in after the most common 8000.
+        public static Speller Build(TextReader everyday, TextReader irish, TextReader mine, TextReader homophones)
+        {
+            var all = new StringWriter();
+            if (mine != null) all.Write(mine.ReadToEnd() + "\n");
+            int n = 0;
+            string line;
+            bool irishDone = irish == null;
+            while ((line = everyday.ReadLine()) != null)
+            {
+                all.Write(line + "\n");
+                if (++n == 8000 && !irishDone) { all.Write(irish.ReadToEnd() + "\n"); irishDone = true; }
+            }
+            if (!irishDone) all.Write(irish.ReadToEnd() + "\n");
+            var sp = new Speller(new StringReader(all.ToString()));
+            if (homophones != null) sp.Homophones = new Homophones(homophones);
+            return sp;
+        }
+
+        private static void AddKey(List<string> ks, string k) { if (k.Length > 0 && !ks.Contains(k)) ks.Add(k); }
 
         public int Count { get { return words.Length; } }
+
+        // Lower case, without fadas or other accents, without apostrophes: "Siobhán" -> "siobhan".
+        public static string Plain(string s)
+        {
+            string d = s.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD);
+            var sb = new StringBuilder(d.Length);
+            foreach (char c in d)
+            {
+                if (c == '\'' || c == '\u2019') continue;
+                if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark) continue;
+                sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        // ---- learning from her picks -----------------------------------------
+
+        // She picked `chosen` for `typed` (chosen == typed means "keep my spelling").
+        public void Learn(string typed, string chosen)
+        {
+            string t = Plain(typed);
+            if (t.Length == 0 || chosen.Length == 0) return;
+            Dictionary<string, int> m;
+            if (!picks.TryGetValue(t, out m)) { m = new Dictionary<string, int>(StringComparer.Ordinal); picks[t] = m; }
+            int n;
+            m.TryGetValue(chosen, out n);
+            m[chosen] = n + 1;
+        }
+
+        // Lines: typed<TAB>chosen<TAB>times
+        public void LoadPicks(TextReader r)
+        {
+            string line;
+            while ((line = r.ReadLine()) != null)
+            {
+                string[] f = line.Split('\t');
+                int n;
+                if (f.Length != 3 || !int.TryParse(f[2], out n)) continue;
+                for (int i = 0; i < n && i < 20; i++) Learn(f[0], f[1]);
+            }
+        }
+
+        public void SavePicks(TextWriter w)
+        {
+            foreach (var t in picks)
+                foreach (var c in t.Value)
+                    w.WriteLine(t.Key + "\t" + c.Key + "\t" + c.Value);
+        }
+
+        // ---- suggestions ------------------------------------------------------
 
         // Best matches first, with the typed word's capitalisation carried over.
         public List<string> Suggest(string typed, int max)
         {
             var result = new List<string>();
+            foreach (Suggestion s in SuggestFull(typed, max, null)) result.Add(s.Word);
+            return result;
+        }
+
+        // Matches with meanings for words that sound alike. `previous` is the word
+        // typed just before, used to guess between there/their/they're and friends.
+        public List<Suggestion> SuggestFull(string typed, int max, string previous)
+        {
+            var result = new List<Suggestion>();
             if (string.IsNullOrEmpty(typed)) return result;
-            string w = typed.ToLowerInvariant().Replace("'", "");
+            string w = Plain(typed);
             if (w.Length == 0) return result;
 
             string ta = SoundKey(w, false), tb = SoundKey(w, true);
@@ -112,10 +212,15 @@ namespace SoundSpell
             double worstKept = double.MaxValue;
             int lenSlack = Math.Max(3, w.Length / 2 + 1);
 
+            Dictionary<string, int> before;
+            picks.TryGetValue(w, out before);
+
             for (int i = 0; i < words.Length; i++)
             {
                 string cand = words[i];
-                if (Math.Abs(cand.Length - w.Length) > lenSlack + 2) continue;
+                int picked = 0;
+                if (before != null) before.TryGetValue(display[i], out picked);
+                if (picked == 0 && Math.Abs(cand.Length - w.Length) > lenSlack + 2) continue;
 
                 double dk = double.MaxValue;
                 foreach (string k in keys[i])
@@ -123,14 +228,17 @@ namespace SoundSpell
                     if (Math.Abs(k.Length - ta.Length) <= 3) dk = Math.Min(dk, KeyDistance(ta, k));
                     if (tb != null && Math.Abs(k.Length - tb.Length) <= 3) dk = Math.Min(dk, KeyDistance(tb, k));
                 }
-                if (dk > 2.5) continue;
+                if (picked == 0 && dk > 2.5) continue;
+                if (dk == double.MaxValue) dk = 3;
                 double freq = Math.Log(i + 2) * 0.2;
-                if (dk * 2.5 + freq >= worstKept) continue;
+                double pickBonus = 1.5 * Math.Min(picked, 3);
+                if (dk * 2.5 + freq - pickBonus >= worstKept) continue;
 
                 double ds = SpellDistance(w, cand) / Math.Max(w.Length, cand.Length);
                 double firstLetter = w[0] == cand[0] ? 0 : 0.3;
-                double score = dk * 2.5 + ds * 1.5 + freq + firstLetter;
-                if (saidKey[i] != null && (saidKey[i] == ta || saidKey[i] == tb)) score -= 1.0; // spelled just as it is said
+                double score = dk * 2.5 + ds * 1.5 + freq + firstLetter - pickBonus;
+                // Spelled (nearly) exactly as the word is said: wensday, neev, teeshock.
+                if (saidAs[i] != null && SpellDistance(w, saidAs[i]) <= (w.Length >= 3 ? 1 : 0)) score -= 1.0;
                 if (cand == w) score -= 0.5; // a real but rare word may still not be the one meant
 
                 if (score < worstKept)
@@ -142,13 +250,25 @@ namespace SoundSpell
                 }
             }
 
-            foreach (var kv in best)
-            {
-                string word = words[kv.Value];
-                if (proper[kv.Value]) word = char.ToUpperInvariant(word[0]) + word.Substring(1);
-                result.Add(MatchCase(typed, word));
-            }
+            foreach (var kv in best) result.Add(new Suggestion(display[kv.Value], null));
+
+            // Her own spelling, if she kept it twice, goes first.
+            int kept;
+            if (before != null && before.TryGetValue(typed, out kept) && kept >= 2 && !Has(result, typed))
+                result.Insert(0, new Suggestion(typed, "your spelling"));
+            else if (before != null && before.TryGetValue(typed, out kept) && kept == 1 && !Has(result, typed))
+                result.Add(new Suggestion(typed, "your spelling"));
+
+            result = Homophones.Expand(result, w, Plain(previous ?? ""), max + 2);
+
+            foreach (Suggestion s in result) s.Word = MatchCase(typed, s.Word);
             return result;
+        }
+
+        private static bool Has(List<Suggestion> list, string word)
+        {
+            foreach (Suggestion s in list) if (string.Equals(s.Word, word, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
         }
 
         public static string MatchCase(string typed, string word)
@@ -156,7 +276,7 @@ namespace SoundSpell
             int letters = 0, upper = 0;
             foreach (char c in typed) if (char.IsLetter(c)) { letters++; if (char.IsUpper(c)) upper++; }
             if (letters > 1 && upper == letters) return word.ToUpperInvariant();
-            if (typed.Length > 0 && char.IsUpper(typed[0])) return char.ToUpperInvariant(word[0]) + word.Substring(1);
+            if (typed.Length > 0 && char.IsUpper(typed[0]) && word.Length > 0) return char.ToUpperInvariant(word[0]) + word.Substring(1);
             return word;
         }
 
@@ -168,6 +288,7 @@ namespace SoundSpell
 
         public static string SoundKey(string w, bool alt)
         {
+            w = Plain(w);
             if (w.Length == 0) return "";
             // Silent letters at the start.
             if (w.StartsWith("kn", StringComparison.Ordinal) || w.StartsWith("gn", StringComparison.Ordinal) || w.StartsWith("pn", StringComparison.Ordinal) || w.StartsWith("wr", StringComparison.Ordinal) || w.StartsWith("ps", StringComparison.Ordinal))
@@ -254,7 +375,9 @@ namespace SoundSpell
                         Add(k, 'K');
                         if (next == 'u') { Add(k, 'W'); i++; }
                         break;
-                    case 'r': Add(k, 'R'); break;
+                    case 'r':
+                        if (next == 'e' && i + 2 == n && i > 0 && !IsVowel(prev)) { Add(k, 'A'); Add(k, 'R'); i++; break; } // centre, theatre
+                        Add(k, 'R'); break;
                     case 's':
                         if (next == 'h') { Add(k, 'X'); i++; }
                         else if (next == 'i' && (next2 == 'o' || next2 == 'a')) Add(k, 'X'); // mission, asia
@@ -342,7 +465,8 @@ namespace SoundSpell
         private static double SlowSubCost(char a, char b)
         {
             if (a == b) return 0;
-            if (Pair(a, b, 'S', 'X') || Pair(a, b, 'K', 'G') || Pair(a, b, 'T', '0') || Pair(a, b, 'F', 'P') || Pair(a, b, 'F', 'V')
+            if (Pair(a, b, 'T', '0')) return 0.2; // "th" said as "t", as in Irish English: tink, tree
+            if (Pair(a, b, 'S', 'X') || Pair(a, b, 'K', 'G') || Pair(a, b, 'F', 'P') || Pair(a, b, 'F', 'V')
                 || Pair(a, b, 'J', 'X') || Pair(a, b, 'X', 'K') || Pair(a, b, 'J', 'K') || Pair(a, b, 'M', 'N')
                 || Pair(a, b, 'S', 'J') || Pair(a, b, 'B', 'P') || Pair(a, b, 'B', 'T') || Pair(a, b, 'W', 'A') || Pair(a, b, 'Y', 'A'))
                 return 0.5;

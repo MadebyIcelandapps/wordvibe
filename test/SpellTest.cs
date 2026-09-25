@@ -9,14 +9,16 @@ static class SpellTest
     static int Main(string[] args)
     {
         var sw = Stopwatch.StartNew();
-        var sp = new Speller(new StreamReader(args[0]));
+        string dir = Path.GetDirectoryName(Path.GetFullPath(args[0]));
+        var sp = Speller.Build(new StreamReader(args[0]), new StreamReader(Path.Combine(dir, "irish.txt")), null,
+                               new StreamReader(Path.Combine(dir, "homophones.txt")));
         Console.WriteLine("loaded " + sp.Count + " words in " + sw.ElapsedMilliseconds + " ms");
         string[,] cases = {
             {"nesesary","necessary"},{"definatly","definitely"},{"becuz","because"},{"restront","restaurant"},
             {"sykology","psychology"},{"fenomenon","phenomenon"},{"tomoro","tomorrow"},{"seperate","separate"},
             {"enuf","enough"},{"nite","night"},{"thru","through"},{"wensday","Wednesday"},{"kwik","quick"},
             {"fone","phone"},{"shure","sure"},{"ocashun","occasion"},{"reseet","receipt"},{"cof","cough"},
-            {"biznes","business"},{"choklit","chocolate"},{"lisen","listen"},{"naber","neighbor"},{"rithm","rhythm"},
+            {"biznes","business"},{"choklit","chocolate"},{"lisen","listen"},{"naber","neighbour"},{"rithm","rhythm"},
             {"jiraf","giraffe"},{"kolij","college"},{"serprize","surprise"},{"beleev","believe"},{"frend","friend"},
             {"weerd","weird"},{"akomodate","accommodate"},{"enjineer","engineer"},{"eksperiens","experience"},
             {"orkestra","orchestra"},{"nolij","knowledge"},{"rong","wrong"},{"serkul","circle"},{"animul","animal"},
@@ -24,12 +26,18 @@ static class SpellTest
             {"sumthing","something"},{"probly","probably"},{"diffrent","different"},
             {"acshully","actually"},{"reely","really"},{"bilding","building"},{"gess","guess"},{"yoosual","usual"},
             {"hed","head"},{"minit","minute"},{"sientist","scientist"},{"nee","knee"},{"lafing","laughing"},
-            {"wether","weather"},{"imajin","imagine"},{"favrit","favorite"},
+            {"wether","weather"},{"imajin","imagine"},
             // dyslexic spellings: flipped letters, swapped letters, dropped letters
             {"freind","friend"},{"wierd","weird"},{"becuase","because"},{"hte","the"},{"wuz","was"},{"sed","said"},
             {"cud","could"},{"shud","should"},{"wud","would"},{"tawk","talk"},{"brother","brother"},{"dady","daddy"},
             {"bady","baby"},{"porblem","problem"},{"diffrint","different"},{"aftr","after"},{"libary","library"},
-            {"gril","girl"},{"wnet","went"},{"sumtimes","sometimes"},{"evry","every"},{"ansur","answer"},{"Wensday","Wednesday"},{"THRU","THROUGH"},
+            {"gril","girl"},{"wnet","went"},{"sumtimes","sometimes"},{"evry","every"},{"ansur","answer"},
+            // Irish and British spellings, Irish names and places, the Irish "th"
+            {"culer","colour"},{"favrit","favourite"},{"realyse","realise"},{"senter","centre"},{"theeater","theatre"},
+            {"neev","Niamh"},{"shivawn","Siobhán"},{"eefa","Aoife"},{"keeva","Caoimhe"},{"seersha","Saoirse"},
+            {"osheen","Oisín"},{"keeran","Ciarán"},{"shawn","Seán"},{"rosheen","Róisín"},{"teeshock","Taoiseach"},
+            {"droheda","Drogheda"},{"leesh","Laois"},{"gardee","Gardaí"},{"slawncha","Sláinte"},{"tink","think"},
+            {"tanks","thanks"},{"Wensday","Wednesday"},{"THRU","THROUGH"},
         };
         int ok = 0, top3 = 0, n = cases.GetLength(0);
         sw.Restart();
@@ -42,6 +50,36 @@ static class SpellTest
             if (!hit) Console.WriteLine((in3 ? "  ~ " : "  X ") + cases[i, 0] + " -> " + string.Join(", ", s) + "   (want " + cases[i, 1] + ")");
         }
         Console.WriteLine("first choice " + ok + "/" + n + ", top 3 " + top3 + "/" + n + ", " + (sw.ElapsedMilliseconds / n) + " ms per word");
-        return top3 * 10 >= n * 9 ? 0 : 1;
+        bool good = top3 * 10 >= n * 9;
+
+        // Words that sound alike: the word before decides the order, meanings come along.
+        good &= Expect("there after 'of'", First(sp.SuggestFull("there", 5, "of")), "their");
+        good &= Expect("there after 'over'", First(sp.SuggestFull("there", 5, "over")), "there");
+        good &= Expect("thair after 'love'", First(sp.SuggestFull("thair", 5, "love")), "their");
+        good &= Expect("youre", First(sp.SuggestFull("youre", 5, null)), "you're");
+        good &= Expect("wether after 'the'", First(sp.SuggestFull("wether", 5, "the")), "weather");
+        good &= Expect("meaning shown", sp.SuggestFull("there", 5, null)[0].Meaning != null ? "yes" : "no", "yes");
+
+        // Learning from picks: what she chose before comes first next time.
+        good &= Expect("gril before learning", sp.Suggest("gril", 5)[0], "grill");
+        sp.Learn("gril", "girl"); sp.Learn("gril", "girl");
+        good &= Expect("gril after picking girl twice", sp.Suggest("gril", 5)[0], "girl");
+        sp.Learn("frend", "frend"); sp.Learn("frend", "frend");
+        good &= Expect("keeping her own spelling twice", sp.Suggest("frend", 5)[0], "frend");
+        var saved = new StringWriter(); sp.SavePicks(saved);
+        var sp2 = Speller.Build(new StreamReader(args[0]), new StreamReader(Path.Combine(dir, "irish.txt")), null, null);
+        sp2.LoadPicks(new StringReader(saved.ToString()));
+        good &= Expect("picks survive a restart", sp2.Suggest("gril", 5)[0], "girl");
+
+        return good ? 0 : 1;
+    }
+
+    static string First(System.Collections.Generic.List<Suggestion> l) { return l.Count > 0 ? l[0].Word : "(none)"; }
+
+    static bool Expect(string what, string got, string want)
+    {
+        bool ok = got == want;
+        Console.WriteLine((ok ? "  ok   " : "  FAIL ") + what + ": " + got + (ok ? "" : "   (want " + want + ")"));
+        return ok;
     }
 }

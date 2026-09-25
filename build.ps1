@@ -16,5 +16,7 @@ if ($outDir) { New-Item -ItemType Directory -Force $outDir | Out-Null }
 & (Join-Path $fw 'csc.exe') /nologo /target:winexe /optimize+ /platform:anycpu "/out:$Out" `
     /r:System.Windows.Forms.dll /r:System.Drawing.dll "/r:$speech" `
     "/resource:$PSScriptRoot\words.txt,SoundSpell.words.txt" `
-    "$PSScriptRoot\src\Speller.cs" "$PSScriptRoot\src\SoundSpell.cs"
+    "/resource:$PSScriptRoot\irish.txt,SoundSpell.irish.txt" `
+    "/resource:$PSScriptRoot\homophones.txt,SoundSpell.homophones.txt" `
+    "$PSScriptRoot\src\*.cs"
 if ($LASTEXITCODE -ne 0) { throw "Build failed ($LASTEXITCODE)" }
