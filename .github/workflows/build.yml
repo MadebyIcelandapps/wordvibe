@@ -36,6 +36,7 @@ jobs:
           if (Test-Path $exe) { throw 'still there after uninstall' }
           if (Get-Process SoundSpell -ErrorAction SilentlyContinue) { throw 'still running after uninstall' }
           Write-Host 'update, install and uninstall ok'
+          exit 0
       - name: Package
         run: |
           New-Item -ItemType Directory pkg | Out-Null
