@@ -144,6 +144,15 @@ namespace SoundSpell
 
         // Browsers and newer apps say through UI Automation when a password field gets
         // the focus; classic Windows password boxes are checked on every key (below).
+        // Password fields are found three ways, because apps differ:
+        // - classic Windows password boxes, by their style, on every key (below);
+        // - UI Automation's focus events (browsers, newer apps);
+        // - asking UI Automation after keys, and right before the strip or list shows.
+        // Once a password field is seen, SoundSpell stays off in that window until the
+        // focus clearly moves to an ordinary text field or to another window: one
+        // unclear answer from an app can never switch it back on.
+        IntPtr passwordWindow;   // the focused window where a password field was seen
+
         void WatchFocus()
         {
             var t = new Thread(delegate ()
@@ -152,11 +161,20 @@ namespace SoundSpell
                 {
                     Automation.AddAutomationFocusChangedEventHandler(delegate (object sender, AutomationFocusChangedEventArgs e)
                     {
-                        bool pw = false;
-                        try { var el = sender as AutomationElement; pw = el != null && el.Current.IsPassword; }
+                        try
+                        {
+                            var el = sender as AutomationElement;
+                            if (el == null) return;
+                            if (el.Current.IsPassword) { MarkPassword(); return; }
+                            // Focus clearly moved to an ordinary text field: SoundSpell may work again.
+                            ControlType ct = el.Current.ControlType;
+                            if (passwordFocus && (ct == ControlType.Edit || ct == ControlType.Document) && !InsidePassword(el))
+                            {
+                                passwordFocus = false;
+                                if (Log.On) Log.Write("focus: ordinary text field");
+                            }
+                        }
                         catch (Exception) { }
-                        passwordFocus = pw;
-                        if (pw) OnHook(ForgetForPassword);
                     });
                 }
                 catch (Exception) { }
@@ -166,14 +184,44 @@ namespace SoundSpell
             t.Start();
         }
 
-        // Asks UI Automation whether the focused element is a password field. Only
-        // called on background threads: it goes into the other app and can be slow.
+        void MarkPassword()
+        {
+            passwordWindow = FocusedWindow();
+            if (!passwordFocus && Log.On) Log.Write("focus: password field");
+            passwordFocus = true;
+            OnHook(ForgetForPassword);
+        }
+
+        // The window (control) with the keyboard focus, from Win32.
+        static IntPtr FocusedWindow()
+        {
+            IntPtr fg = Native.GetForegroundWindow();
+            uint tid = Native.GetWindowThreadProcessId(fg, IntPtr.Zero);
+            var gti = new Native.GUITHREADINFO();
+            gti.cbSize = Marshal.SizeOf(typeof(Native.GUITHREADINFO));
+            return Native.GetGUIThreadInfo(tid, ref gti) && gti.hwndFocus != IntPtr.Zero ? gti.hwndFocus : fg;
+        }
+
+        // Some apps (WPF, for one) report the whole window as focused rather than the
+        // field in it; then look inside for the element that has the keyboard.
+        static bool InsidePassword(AutomationElement el)
+        {
+            ControlType ct = el.Current.ControlType;
+            if (ct != ControlType.Window && ct != ControlType.Pane && ct != ControlType.Custom && ct != ControlType.Group) return false;
+            AutomationElement inner = el.FindFirst(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.HasKeyboardFocusProperty, true));
+            return inner != null && inner.Current.IsPassword;
+        }
+
+        // Asks UI Automation whether the focus is in a password field. Only called on
+        // background threads: it goes into the other app and can be slow.
         static bool FocusIsPassword()
         {
             try
             {
                 AutomationElement el = AutomationElement.FocusedElement;
-                return el != null && el.Current.IsPassword;
+                if (el == null) return false;
+                return el.Current.IsPassword || InsidePassword(el);
             }
             catch (Exception) { return false; }
         }
@@ -184,12 +232,13 @@ namespace SoundSpell
             while (true)
             {
                 focusWake.WaitOne();
-                bool pw = FocusIsPassword();
-                if (pw != passwordFocus)
+                if (FocusIsPassword()) { MarkPassword(); continue; }
+                // Only a move to another window ends it here; within the same window,
+                // a focus event for an ordinary field has to say so (see WatchFocus).
+                if (passwordFocus && FocusedWindow() != passwordWindow)
                 {
-                    passwordFocus = pw;
-                    if (Log.On) Log.Write(pw ? "focus: password field" : "focus: not a password field");
-                    if (pw) OnHook(ForgetForPassword);
+                    passwordFocus = false;
+                    if (Log.On) Log.Write("focus: left the password field's window");
                 }
             }
         }
@@ -507,7 +556,7 @@ namespace SoundSpell
                 lock (lookupLock) { word = lookupWanted; previous = lookupPrevious; lookupWanted = null; }
                 Speller sp = app.Speller;
                 if (word == null || sp == null || passwordFocus) continue;
-                if (FocusIsPassword()) { passwordFocus = true; OnHook(ForgetForPassword); continue; }
+                if (FocusIsPassword()) { MarkPassword(); continue; }
                 List<Suggestion> found = sp.SuggestFull(word, 5, previous);
                 OnHook(delegate
                 {
@@ -825,12 +874,7 @@ namespace SoundSpell
                 string text; int version;
                 lock (stripLock) { text = stripText; version = stripVersion; }
                 if (text == null || passwordFocus) continue;
-                if (FocusIsPassword())
-                {
-                    passwordFocus = true;
-                    OnHook(ForgetForPassword);
-                    continue;
-                }
+                if (FocusIsPassword()) { MarkPassword(); continue; }
                 List<StripWord> words = SentenceWords(text, app.Speller);
                 bool exact;
                 Rectangle caret = Caret.Find(out exact);

@@ -92,7 +92,7 @@ function StripCheck {
     Start-Sleep -Milliseconds 900
     $line = Get-Content $env:SOUNDSPELL_LOG | Where-Object { $_ -match 'strip at (-?\d+),(-?\d+),(\d+),(\d+) glass=(\w+)' } | Select-Object -Last 1
     $ok = $false
-    if ($line -and $line -match 'strip at (-?\d+),(-?\d+),(\d+),(\d+) glass=(\w+) words: (.*)$') {
+    if ($line -and $line -match 'strip at (-?\d+),(-?\d+),(\d+),(\d+) glass=(\w+)(?: mode=\w+)? words: (.*)$') {
         $x = [int]$Matches[1]; $y = [int]$Matches[2]; $w = [int]$Matches[3]; $h = [int]$Matches[4]; $glass = $Matches[5]; $words = $Matches[6]
         $bmp = New-Object System.Drawing.Bitmap $w, $h
         $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -213,6 +213,7 @@ $results = @(
     (StripCheck),
     (ReadCheck),
     (PasswordCheck 'classic'),
+    (PasswordCheck 'modern'),
     (PasswordCheck 'modern')
 )
 
