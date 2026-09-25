@@ -233,10 +233,14 @@ namespace SoundSpell
             {
                 focusWake.WaitOne();
                 if (FocusIsPassword()) { MarkPassword(); continue; }
-                // Only a move to another window ends it here; within the same window,
-                // a focus event for an ordinary field has to say so (see WatchFocus).
+                // Only a move to another window ends it here, and only if a second look
+                // a moment later agrees; within the same window, a focus event for an
+                // ordinary field has to say so (see WatchFocus).
                 if (passwordFocus && FocusedWindow() != passwordWindow)
                 {
+                    Thread.Sleep(150);
+                    if (FocusIsPassword()) { MarkPassword(); continue; }
+                    if (FocusedWindow() == passwordWindow) continue;
                     passwordFocus = false;
                     if (Log.On) Log.Write("focus: left the password field's window");
                 }
@@ -401,6 +405,9 @@ namespace SoundSpell
             if (IsModifier(vk)) return false;
             if (InPassword)
             {
+                // Typing here means this is the password field's window (Windows can
+                // announce the field a moment before its window comes to the front).
+                if (passwordFocus) passwordWindow = FocusedWindow();
                 if (recent.Length > 0 || popupUp) ForgetForPassword();
                 if (Log.On) Log.Write("key in a password field: ignored");
                 return false;

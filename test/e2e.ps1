@@ -36,6 +36,9 @@ public static class Kbd {
   public static void Tap(int vk) { Key(vk, false); Key(vk, true); }
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [StructLayout(LayoutKind.Sequential)] public struct R { public int l, t, r, b; }
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out R r);
+  public static void ClickForegroundCenter() { R r; GetWindowRect(GetForegroundWindow(), out r); Click((r.l + r.r) / 2, (r.t + r.b) / 2 + 10); }
   public static string ForegroundTitle() { var sb = new System.Text.StringBuilder(256); GetWindowText(GetForegroundWindow(), sb, 256); return sb.ToString(); }
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags, int x, int y, uint data, IntPtr extra);
@@ -159,6 +162,8 @@ function PasswordCheck([string]$kind) {
         Start-Sleep -Milliseconds 500
     }
     Start-Sleep -Milliseconds 800
+    [Kbd]::ClickForegroundCenter()   # put the cursor in the password box
+    Start-Sleep -Milliseconds 600
     if ([Kbd]::ForegroundTitle() -ne 'Password test') {
         Stop-Process $form.Id -Force -ErrorAction SilentlyContinue
         $line = "FAIL $kind password box: the test window never came to the front"
