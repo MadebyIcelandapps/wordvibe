@@ -64,11 +64,13 @@ function Check([string]$typed, [string]$want) {
     Start-Sleep -Milliseconds 300
     $got = (Get-Clipboard -Raw) -replace "`r`n", "`n"
     Stop-Process $np.Id -Force
-    if ($got -ceq $want) { Write-Host "ok   $typed" ; return $true }
-    Write-Host "FAIL $typed"; Write-Host "     want: [$want]"; Write-Host "     got:  [$got]"
+    if ($got -ceq $want) { Write-Host "ok   $typed"; $script:summary += "ok   $typed"; return $true }
+    $line = "FAIL $typed   want [$want]   got [$got]"
+    Write-Host $line; $script:summary += $line
     return $false
 }
 
+$script:summary = @()
 $results = @(
     # Space swaps the word and keeps the space.
     (Check 'hello @@nesesary and' "hello necessary and"),
@@ -98,5 +100,7 @@ $results = @(
 )
 
 Stop-Process $app.Id -Force
-if ($results -contains $false -and (Test-Path $env:SOUNDSPELL_LOG)) { Write-Host '--- SoundSpell log ---'; Get-Content $env:SOUNDSPELL_LOG }
+if ($results -contains $false -and (Test-Path $env:SOUNDSPELL_LOG)) { Write-Host '--- SoundSpell log (end) ---'; Get-Content $env:SOUNDSPELL_LOG -Tail 80 }
+Write-Host '--- results ---'
+$script:summary | ForEach-Object { Write-Host $_ }
 if ($results -contains $false) { exit 1 }
