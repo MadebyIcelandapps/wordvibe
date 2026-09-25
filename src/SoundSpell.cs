@@ -28,6 +28,25 @@ namespace SoundSpell
         {
             // For the automatic checks: SoundSpell.exe --voice-test <voice id> <out.wav> <text>
             if (args.Length == 4 && args[0] == "--voice-test") return Voice.SelfTest(args[1], args[3], args[2]);
+            // For the automatic checks: SoundSpell.exe --strip-test
+            // shows the strip with sample words at 300,300 for a few seconds, with blank
+            // space on its right so the glass can be measured.
+            if (args.Length == 1 && args[0] == "--strip-test")
+            {
+                Application.EnableVisualStyles();
+                var strip = new SentenceStrip();
+                SentenceStrip.TestExtraWidth = 160;
+                var words = new List<StripWord> {
+                    new StripWord { Text = "see", State = WordState.Good },
+                    new StripWord { Text = "wensday", State = WordState.Bad } };
+                var host = new Form { ShowInTaskbar = false, Opacity = 0, Size = new System.Drawing.Size(1, 1) };
+                host.Shown += delegate { strip.ShowWords(words, new System.Drawing.Rectangle(560, 300, 1, 20), true); };
+                var close = new System.Windows.Forms.Timer { Interval = 4000 };
+                close.Tick += delegate { host.Close(); };
+                close.Start();
+                Application.Run(host);
+                return 0;
+            }
             // For the automatic checks: SoundSpell.exe --update-window-test <WHATSNEW.md>
             // shows the update window as if 99.0.0 were out, for a few seconds.
             if (args.Length == 2 && args[0] == "--update-window-test")
@@ -652,6 +671,43 @@ namespace SoundSpell
         [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
+
+        // ---- see-through pictures (layered windows) -------------------------------
+
+        [StructLayout(LayoutKind.Sequential)] struct SIZE { public int cx, cy; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)] struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr dst, ref POINT at, ref SIZE size, IntPtr src, ref POINT from, int key, ref BLENDFUNCTION blend, int flags);
+        [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
+        [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+        [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+        [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+        [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
+
+        // Shows `picture` (with its see-through pixels) as the layered window's content at x, y.
+        public static void ShowLayered(IntPtr hwnd, System.Drawing.Bitmap picture, int x, int y)
+        {
+            IntPtr screen = GetDC(IntPtr.Zero);
+            IntPtr mem = CreateCompatibleDC(screen);
+            IntPtr bits = picture.GetHbitmap(System.Drawing.Color.FromArgb(0));
+            IntPtr old = SelectObject(mem, bits);
+            try
+            {
+                var size = new SIZE { cx = picture.Width, cy = picture.Height };
+                var from = new POINT();
+                var at = new POINT { x = x, y = y };
+                var blend = new BLENDFUNCTION { BlendOp = 0, SourceConstantAlpha = 255, AlphaFormat = 1 }; // AC_SRC_ALPHA
+                UpdateLayeredWindow(hwnd, screen, ref at, ref size, mem, ref from, 0, ref blend, 2); // ULW_ALPHA
+            }
+            finally
+            {
+                SelectObject(mem, old);
+                DeleteObject(bits);
+                DeleteDC(mem);
+                ReleaseDC(IntPtr.Zero, screen);
+            }
+        }
 
         // ---- frosted glass (Windows 10 and 11) ------------------------------------
 

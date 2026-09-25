@@ -25,6 +25,43 @@ jobs:
         run: ./build.ps1
       - name: Try it in Notepad
         run: ./test/e2e.ps1
+      - name: Strip opacity changes what you see
+        run: |
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          # A solid blue window fills the screen behind the strip.
+          $blue = Start-Process powershell -PassThru -ArgumentList '-NoProfile', '-Command', 'Add-Type -AssemblyName System.Windows.Forms; $f = New-Object Windows.Forms.Form; $f.BackColor = [Drawing.Color]::FromArgb(0,0,255); $f.FormBorderStyle = ''None''; $f.WindowState = ''Maximized''; [Windows.Forms.Application]::Run($f)'
+          Start-Sleep 5
+          $key = 'HKCU:\Software\SoundSpell'
+          New-Item $key -Force | Out-Null
+          Set-ItemProperty $key Colours 'Dark'
+          $env:SOUNDSPELL_LOG = Join-Path $env:TEMP 'strip-test.log'
+          $t = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue).EnableTransparency
+          Write-Host "Windows transparency effects setting: [$t]"
+          $blueness = @{}
+          foreach ($blur in 0, 1) {
+            foreach ($opacity in 10, 80) {
+              Set-ItemProperty $key GlassBlur $blur -Type DWord
+              Set-ItemProperty $key GlassOpacity $opacity -Type DWord
+              Remove-Item $env:SOUNDSPELL_LOG -ErrorAction SilentlyContinue
+              $p = Start-Process ./SoundSpell.exe -ArgumentList '--strip-test' -PassThru
+              Start-Sleep -Milliseconds 2200
+              $m = (Select-String -Path $env:SOUNDSPELL_LOG -Pattern 'strip at (\d+),(\d+),(\d+),(\d+) .*mode=(\w+)' | Select-Object -Last 1).Matches[0].Groups
+              $x = [int]$m[1].Value; $y = [int]$m[2].Value; $w = [int]$m[3].Value; $h = [int]$m[4].Value
+              $bmp = New-Object Drawing.Bitmap 1, 1
+              [Drawing.Graphics]::FromImage($bmp).CopyFromScreen($x + $w - 60, $y + [int]($h / 2), 0, 0, $bmp.Size)
+              $c = $bmp.GetPixel(0, 0)
+              Write-Host "blur=$blur opacity=$opacity drawn as $($m[5].Value): colour in the blank part = ($($c.R), $($c.G), $($c.B))"
+              Get-Content $env:SOUNDSPELL_LOG | Where-Object { $_ -match 'strip glass' }
+              $blueness["$blur/$opacity"] = [int]$c.B
+              $p.WaitForExit()
+            }
+          }
+          Stop-Process $blue.Id -Force
+          Remove-Item $key -Recurse -Force
+          # A dark tint over blue: more opacity must mean less blue.
+          if ($blueness['0/10'] - $blueness['0/80'] -lt 60) { throw 'see-through (no blur): the opacity slider does not change the look' }
+          if ($blueness['1/10'] - $blueness['1/80'] -lt 60) { throw 'frosted: the opacity slider does not change the look' }
+          Write-Host 'opacity changes the look in both modes'
       - name: Update window shows what is new
         run: |
           $env:SOUNDSPELL_LOG = Join-Path $env:TEMP 'update-window.log'

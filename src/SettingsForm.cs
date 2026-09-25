@@ -12,6 +12,7 @@ namespace SoundSpell
     sealed class SettingsForm : Form
     {
         readonly Panel preview = new Panel();
+        Label glassNowLabel;
         int y = 12;
         bool loading = true;
 
@@ -44,8 +45,12 @@ namespace SoundSpell
             Slider("    Glass opacity:", 10, 90, Prefs.GetNumber("GlassOpacity", 35), "%",
                 delegate (int v) { Prefs.SetNumber("GlassOpacity", v); });
             Check("    Frosted (blur what is behind it)", Prefs.Get("GlassBlur", true),
-                delegate (bool v) { Prefs.Set("GlassBlur", v); });
-            Note("If it is never see-through: Windows Settings, Personalisation, Colours, Transparency effects.");
+                delegate (bool v) { Prefs.Set("GlassBlur", v); if (glassNowLabel != null) glassNowLabel.Text = "Now: " + SentenceStrip.GlassDescription(); });
+            var glassNow = new Label { Text = "Now: " + SentenceStrip.GlassDescription(), MaximumSize = new Size(ClientSize.Width - 60, 0), AutoSize = true, ForeColor = SystemColors.GrayText, Font = new Font("Verdana", 9f) };
+            glassNow.Location = new Point(40, y - 4);
+            Controls.Add(glassNow);
+            glassNowLabel = glassNow;
+            y += glassNow.PreferredHeight + 10;
             Check("Fix my usual mistakes by themselves", Prefs.Get("AutoFix", true),
                 delegate (bool v) { Prefs.Set("AutoFix", v); app.Apply(); });
             Note("A mistake you fix the same way 3 times gets fixed as you type after that.");
