@@ -124,6 +124,7 @@ function StripCheck {
 
 # Select text, tap Ctrl twice: it is read out (the log shows what was said).
 function ReadCheck {
+    $logStart = (Get-Content $env:SOUNDSPELL_LOG).Count
     $np = Start-Process notepad -PassThru
     Start-Sleep -Seconds 2
     $null = $shell.AppActivate($np.Id)
@@ -133,9 +134,11 @@ function ReadCheck {
     Start-Sleep -Milliseconds 300
     Type-Slowly '{CTRL2}'
     Start-Sleep -Milliseconds 1200
+    Start-Sleep -Milliseconds 1000
     $said = Get-Content $env:SOUNDSPELL_LOG | Where-Object { $_ -match 'speak: please read this out' }
     Stop-Process $np.Id -Force
     $ok = [bool]$said
+    if (-not $ok) { Write-Host '--- trace for: read aloud'; Get-Content $env:SOUNDSPELL_LOG | Select-Object -Skip $logStart | ForEach-Object { Write-Host "    $_" } }
     $line = if ($ok) { "ok   Ctrl twice reads the selected text" } else { "FAIL Ctrl twice did not read the selection" }
     Write-Host $line; $script:summary += $line
     return $ok

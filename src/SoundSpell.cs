@@ -331,7 +331,7 @@ namespace SoundSpell
             wait.Tick += delegate
             {
                 bool changed = Native.GetClipboardSequenceNumber() != before;
-                if (!changed && ++tries < 8) return;
+                if (!changed && ++tries < 25) return; // up to 1.5 s: some apps are slow to copy
                 wait.Stop();
                 wait.Dispose();
                 string selected = null;
