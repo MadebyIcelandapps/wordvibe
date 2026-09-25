@@ -12,6 +12,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Windows.Automation;
 using System.Windows.Forms;
 
 namespace SoundSpell
@@ -75,6 +76,10 @@ namespace SoundSpell
         int stripVersion;
         Rectangle lastCaret = Rectangle.Empty;
 
+        // True while the text cursor is in a password field. Then SoundSpell does
+        // nothing at all: no strip, no list, no fixes, nothing remembered or logged.
+        volatile bool passwordFocus;
+
         // Shortcut taps: a key pressed and let go with nothing else in between.
         bool shiftClean, rctrlClean, lctrlClean;
         DateTime lastShiftTap = DateTime.MinValue, lastCtrlTap = DateTime.MinValue;
@@ -111,6 +116,7 @@ namespace SoundSpell
             t.Name = "keys";
             t.Start();
             ready.WaitOne();
+            WatchFocus();
             foreach (ThreadStart work in new ThreadStart[] { LookupLoop, StripLoop })
             {
                 var w = new Thread(work);
@@ -134,6 +140,54 @@ namespace SoundSpell
             }
             catch (Exception) { }
         }
+
+        // Browsers and newer apps say through UI Automation when a password field gets
+        // the focus; classic Windows password boxes are checked on every key (below).
+        void WatchFocus()
+        {
+            var t = new Thread(delegate ()
+            {
+                try
+                {
+                    Automation.AddAutomationFocusChangedEventHandler(delegate (object sender, AutomationFocusChangedEventArgs e)
+                    {
+                        bool pw = false;
+                        try { var el = sender as AutomationElement; pw = el != null && el.Current.IsPassword; }
+                        catch (Exception) { }
+                        passwordFocus = pw;
+                        if (pw) OnHook(ForgetForPassword);
+                    });
+                }
+                catch (Exception) { }
+            });
+            t.IsBackground = true;
+            t.SetApartmentState(ApartmentState.MTA);
+            t.Start();
+        }
+
+        void ForgetForPassword()
+        {
+            recent.Length = 0;
+            liveWord = null;
+            CloseAll();
+            HideStrip();
+        }
+
+        // A classic Windows password box (an Edit control with the password style).
+        static bool InClassicPasswordBox()
+        {
+            IntPtr fg = Native.GetForegroundWindow();
+            uint tid = Native.GetWindowThreadProcessId(fg, IntPtr.Zero);
+            var gti = new Native.GUITHREADINFO();
+            gti.cbSize = Marshal.SizeOf(typeof(Native.GUITHREADINFO));
+            if (!Native.GetGUIThreadInfo(tid, ref gti) || gti.hwndFocus == IntPtr.Zero) return false;
+            var cls = new StringBuilder(64);
+            Native.GetClassName(gti.hwndFocus, cls, cls.Capacity);
+            if (cls.ToString().IndexOf("Edit", StringComparison.OrdinalIgnoreCase) < 0) return false;
+            return (Native.GetWindowLong(gti.hwndFocus, -16).ToInt64() & 0x20) != 0; // GWL_STYLE, ES_PASSWORD
+        }
+
+        public bool InPassword { get { return passwordFocus || InClassicPasswordBox(); } }
 
         // Runs `a` on the hook thread, after the current hook call (if any) returns.
         void OnHook(Action a)
@@ -211,6 +265,7 @@ namespace SoundSpell
         // capital or Ctrl for Ctrl+C never counts.
         void WatchTaps(int vk, bool isDown, bool wasDown)
         {
+            if (!isDown && passwordFocus) return;
             bool shift = vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_SHIFT;
             if (isDown)
             {
@@ -264,8 +319,14 @@ namespace SoundSpell
 
         bool OnKeyDown(int vk, int scan)
         {
-            if (Log.On) Log.Write("key " + vk.ToString("X2") + " ctrl=" + Down(VK_CONTROL) + " popup=" + popupUp + " choices=" + (choices != null) + " recent=[" + recent + "]");
             if (IsModifier(vk)) return false;
+            if (InPassword)
+            {
+                if (recent.Length > 0 || popupUp) ForgetForPassword();
+                if (Log.On) Log.Write("key in a password field: ignored");
+                return false;
+            }
+            if (Log.On) Log.Write("key " + vk.ToString("X2") + " ctrl=" + Down(VK_CONTROL) + " popup=" + popupUp + " choices=" + (choices != null) + " recent=[" + recent + "]");
             // Screenshot keys (Print Screen, Win+Shift+S) leave everything as it is,
             // so the strip and the list can be in the picture.
             if (vk == 0x2C || Down(VK_LWIN) || Down(VK_RWIN)) return false;
@@ -732,7 +793,7 @@ namespace SoundSpell
                 Thread.Sleep(40); // let a burst of keys settle
                 string text; int version;
                 lock (stripLock) { text = stripText; version = stripVersion; }
-                if (text == null) continue;
+                if (text == null || passwordFocus) continue;
                 List<StripWord> words = SentenceWords(text, app.Speller);
                 bool exact;
                 Rectangle caret = Caret.Find(out exact);

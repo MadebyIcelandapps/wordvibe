@@ -141,6 +141,26 @@ function ReadCheck {
     return $ok
 }
 
+# In a password box SoundSpell must do nothing: no fix, no strip, no list, no trace.
+function PasswordCheck([string]$kind) {
+    $out = Join-Path $env:TEMP "password-$kind.txt"
+    Remove-Item $out -ErrorAction SilentlyContinue
+    $logStart = (Get-Content $env:SOUNDSPELL_LOG).Count
+    $form = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSScriptRoot\password-form.ps1`"", $kind, "`"$out`"" -PassThru
+    Start-Sleep -Seconds 5
+    $null = $shell.AppActivate('Password test')
+    Start-Sleep -Milliseconds 700
+    Type-Slowly 'hello @@wensday secret nesesary{SHIFT2}'
+    Start-Sleep -Milliseconds 1200
+    $got = if (Test-Path $out) { Get-Content $out -Raw } else { '(nothing typed)' }
+    $leaks = Get-Content $env:SOUNDSPELL_LOG | Select-Object -Skip $logStart | Where-Object { $_ -match 'strip at|SendInput|speak:|recent=\[.+\]' }
+    Stop-Process $form.Id -Force
+    $ok = ($got -ceq 'hello @@wensday secret nesesary') -and -not $leaks
+    $line = if ($ok) { "ok   $kind password box left alone" } else { "FAIL $kind password box: got [$got], leaks: $($leaks -join ' | ')" }
+    Write-Host $line; $script:summary += $line
+    return $ok
+}
+
 $script:summary = @()
 $results = @(
     # Space swaps the word and keeps the space.
@@ -176,7 +196,9 @@ $results = @(
     # Fixed the same way 3 times above (wensday -> Wednesday): now it happens by itself.
     (Check 'on wensday ' "on Wednesday "),
     (StripCheck),
-    (ReadCheck)
+    (ReadCheck),
+    (PasswordCheck 'classic'),
+    (PasswordCheck 'modern')
 )
 
 Stop-Process $app.Id -Force
