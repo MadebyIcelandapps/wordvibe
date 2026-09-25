@@ -15,6 +15,8 @@ if ($outDir) { New-Item -ItemType Directory -Force $outDir | Out-Null }
 
 & (Join-Path $fw 'csc.exe') /nologo /target:winexe /optimize+ /platform:anycpu "/out:$Out" `
     /r:System.Windows.Forms.dll /r:System.Drawing.dll "/r:$speech" `
+    "/r:$fw\System.IO.Compression.dll" "/r:$fw\System.IO.Compression.FileSystem.dll" `
+    "/r:$fw\WPF\UIAutomationClient.dll" "/r:$fw\WPF\UIAutomationTypes.dll" "/r:$fw\WPF\WindowsBase.dll" `
     "/resource:$PSScriptRoot\words.txt,SoundSpell.words.txt" `
     "/resource:$PSScriptRoot\irish.txt,SoundSpell.irish.txt" `
     "/resource:$PSScriptRoot\homophones.txt,SoundSpell.homophones.txt" `

@@ -153,6 +153,35 @@ namespace SoundSpell
             return sb.ToString();
         }
 
+        // ---- is this word spelled right? --------------------------------------
+
+        static readonly HashSet<string> Contractions = new HashSet<string>(StringComparer.Ordinal) {
+            "i'm", "you're", "we're", "they're", "it's", "that's", "there's", "here's", "what's", "who's", "where's",
+            "how's", "let's", "he's", "she's", "don't", "doesn't", "didn't", "can't", "couldn't", "won't", "wouldn't",
+            "shouldn't", "isn't", "aren't", "wasn't", "weren't", "haven't", "hasn't", "hadn't", "mustn't", "needn't",
+            "i've", "you've", "we've", "they've", "could've", "would've", "should've", "might've", "must've",
+            "i'd", "you'd", "he'd", "she'd", "we'd", "they'd", "it'd", "that'd", "who'd", "i'll", "you'll", "he'll",
+            "she'll", "we'll", "they'll", "it'll", "that'll", "there'll", "ain't", "y'all", "o'clock", "ma'am",
+            "c'mon", "'cause", "'til", "d'you",
+        };
+
+        // True if the word is in the dictionary (either US or UK spelling), is one of
+        // her own words, is a contraction like "don't", or is a word plus 's.
+        public bool IsWord(string word)
+        {
+            if (string.IsNullOrEmpty(word)) return true;
+            string lower = word.ToLowerInvariant().Replace('\u2019', '\'').Trim('\'');
+            if (lower.Length == 0) return true;
+            if (lower.IndexOf('\'') >= 0)
+            {
+                if (Contractions.Contains(lower)) return true;
+                if (lower.EndsWith("'s") || lower.EndsWith("s'")) return IsWord(lower.Substring(0, lower.Length - 2));
+                if (lower.StartsWith("o'")) return index.ContainsKey(Plain(lower)); // O'Brien in her words
+                return false;
+            }
+            return index.ContainsKey(Plain(lower));
+        }
+
         // ---- learning from her picks -----------------------------------------
 
         // She picked `chosen` for `typed` (chosen == typed means "keep my spelling").
@@ -165,6 +194,14 @@ namespace SoundSpell
             int n;
             m.TryGetValue(chosen, out n);
             m[chosen] = n + 1;
+        }
+
+        // How many times she picked `chosen` for `typed`.
+        public int Picked(string typed, string chosen)
+        {
+            Dictionary<string, int> m;
+            int n;
+            return picks.TryGetValue(Plain(typed), out m) && m.TryGetValue(chosen, out n) ? n : 0;
         }
 
         // Lines: typed<TAB>chosen<TAB>times

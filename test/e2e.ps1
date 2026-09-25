@@ -44,6 +44,7 @@ function Type-Slowly([string]$keys) {
         if ($keys[$i] -eq '{') {
             $end = $keys.IndexOf('}', $i); $name = $keys.Substring($i + 1, $end - $i - 1); $i = $end + 1
             if ($name -eq 'ENTER') { [Kbd]::Press(0x0D, $false, $false) }
+            if ($name -eq 'CTRL2') { [Kbd]::Tap(0xA2); Start-Sleep -Milliseconds 120; [Kbd]::Tap(0xA2); Start-Sleep -Milliseconds 300 }
             if ($name -eq 'SHIFT2') { [Kbd]::Tap(0xA0); Start-Sleep -Milliseconds 120; [Kbd]::Tap(0xA0); Start-Sleep -Milliseconds 300 }
         }
         elseif ($keys[$i] -eq '^') { [Kbd]::Press([int][char]$keys[$i + 1], $false, $true); $i += 2 }
@@ -70,6 +71,60 @@ function Check([string]$typed, [string]$want) {
     return $false
 }
 
+Add-Type -AssemblyName System.Drawing
+
+# The strip shows while typing: find where it is from the log, then look at the pixels.
+function StripCheck {
+    $np = Start-Process notepad -PassThru
+    Start-Sleep -Seconds 2
+    $null = $shell.AppActivate($np.Id)
+    Start-Sleep -Milliseconds 500
+    Type-Slowly 'we went to nesesary lengths'
+    Start-Sleep -Milliseconds 900
+    $line = Get-Content $env:SOUNDSPELL_LOG | Where-Object { $_ -match 'strip at (-?\d+),(-?\d+),(\d+),(\d+) glass=(\w+)' } | Select-Object -Last 1
+    $ok = $false
+    if ($line -and $line -match 'strip at (-?\d+),(-?\d+),(\d+),(\d+) glass=(\w+) words: (.*)$') {
+        $x = [int]$Matches[1]; $y = [int]$Matches[2]; $w = [int]$Matches[3]; $h = [int]$Matches[4]; $glass = $Matches[5]; $words = $Matches[6]
+        $bmp = New-Object System.Drawing.Bitmap $w, $h
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.CopyFromScreen($x, $y, 0, 0, $bmp.Size)
+        $red = 0; $green = 0; $sum = 0; $n = 0
+        for ($i = 0; $i -lt $w; $i += 2) { for ($j = 0; $j -lt $h; $j += 2) {
+            $c = $bmp.GetPixel($i, $j); $n++; $sum += ($c.R + $c.G + $c.B) / 3
+            if ($c.R -gt $c.G + 40 -and $c.R -gt $c.B + 40) { $red++ }
+            if ($c.G -gt $c.R + 25 -and $c.G -gt $c.B + 10) { $green++ }
+        } }
+        $bmp.Save((Join-Path (Split-Path -Parent $PSScriptRoot) 'strip.png'))
+        $avg = [int]($sum / $n)
+        $info = "strip ${w}x${h} glass=$glass red=$red green=$green brightness=$avg words: $words"
+        Write-Host $info
+        $ok = ($words -match 'nesesary=Bad') -and ($words -match 'went=Good') -and $red -gt 5 -and $green -gt 5 -and $avg -gt 90
+    }
+    Stop-Process $np.Id -Force
+    $line2 = if ($ok) { "ok   strip shows green and red ($info)" } else { "FAIL strip ($info) [$line]" }
+    Write-Host $line2; $script:summary += $line2
+    return $ok
+}
+
+# Select text, tap Ctrl twice: it is read out (the log shows what was said).
+function ReadCheck {
+    $np = Start-Process notepad -PassThru
+    Start-Sleep -Seconds 2
+    $null = $shell.AppActivate($np.Id)
+    Start-Sleep -Milliseconds 500
+    Type-Slowly 'please read this out'
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    Start-Sleep -Milliseconds 300
+    Type-Slowly '{CTRL2}'
+    Start-Sleep -Milliseconds 1200
+    $said = Get-Content $env:SOUNDSPELL_LOG | Where-Object { $_ -match 'speak: please read this out' }
+    Stop-Process $np.Id -Force
+    $ok = [bool]$said
+    $line = if ($ok) { "ok   Ctrl twice reads the selected text" } else { "FAIL Ctrl twice did not read the selection" }
+    Write-Host $line; $script:summary += $line
+    return $ok
+}
+
 $script:summary = @()
 $results = @(
     # Space swaps the word and keeps the space.
@@ -93,9 +148,15 @@ $results = @(
     # Irish and British spelling.
     (Check 'my @@favrit ' "my favourite "),
     (Check 'hi @@neev ' "hi Niamh "),
+    # The strip: the last word is fine, so Shift twice fixes the red word before it.
+    (Check 'I like wensday bananas{SHIFT2}' "I like Wednesday bananas"),
     # Learning: pick the 2nd match once, and next time it comes first by itself.
     (Check '@@gril ^2' "girl "),
-    (Check '@@gril ' "girl ")
+    (Check '@@gril ' "girl "),
+    # Fixed the same way 3 times above (wensday -> Wednesday): now it happens by itself.
+    (Check 'on wensday ' "on Wednesday "),
+    (StripCheck),
+    (ReadCheck)
 )
 
 Stop-Process $app.Id -Force

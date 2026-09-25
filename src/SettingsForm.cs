@@ -33,8 +33,21 @@ namespace SoundSpell
             Note("Type a word the way it sounds, then use the shortcut. @@word works too.");
             Check("Put in the first match by itself (off: only show the list)", Prefs.Get("AutoReplace", true),
                 delegate (bool v) { Prefs.Set("AutoReplace", v); app.Apply(); });
+            Check("Show the sentence above what I type (green: right, red: check it)", Prefs.Get("Strip", true),
+                delegate (bool v) { Prefs.Set("Strip", v); app.Apply(); });
+            Check("Fix my usual mistakes by themselves", Prefs.Get("AutoFix", true),
+                delegate (bool v) { Prefs.Set("AutoFix", v); app.Apply(); });
+            Note("A mistake you fix the same way 3 times gets fixed as you type after that.");
+            var list = new Button { Text = "See or change that list...", AutoSize = true };
+            list.Location = new Point(40, y);
+            list.Click += delegate { app.EditAutoFixes(); };
+            Controls.Add(list);
+            y += 38;
 
             Heading("Hearing words");
+            VoicePicker();
+            Check("Tap Ctrl twice to hear the selected text (or the sentence I am typing)", Prefs.Get("ReadOnCtrl", true),
+                delegate (bool v) { Prefs.Set("ReadOnCtrl", v); app.Apply(); });
             Check("Read the fixed word out loud", Prefs.Get("ReadAloud", false),
                 delegate (bool v) { Prefs.Set("ReadAloud", v); app.Apply(); });
             Check("Read a match out loud when I point at it", Prefs.Get("HearOnPoint", true),
@@ -93,8 +106,82 @@ namespace SoundSpell
             Controls.Add(version);
             y += 28;
 
-            ClientSize = new Size(ClientSize.Width, y);
+            // Scrolls on small screens.
+            AutoScroll = true;
+            int room = Screen.FromPoint(Cursor.Position).WorkingArea.Height - 80;
+            ClientSize = new Size(ClientSize.Width + (y > room ? SystemInformation.VerticalScrollBarWidth : 0), Math.Min(y, room));
             loading = false;
+        }
+
+        // The voice: Windows' own, or a natural one that downloads once.
+        void VoicePicker()
+        {
+            var label = new Label { Text = "Voice:", AutoSize = true };
+            label.Location = new Point(20, y + 4);
+            Controls.Add(label);
+            var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 330 };
+            box.Location = new Point(ClientSize.Width - 20 - box.Width, y);
+            Controls.Add(box);
+            y += 34;
+            var status = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Font = new Font("Verdana", 9f) };
+            status.Location = new Point(40, y - 4);
+            Controls.Add(status);
+            var sample = new Button { Text = "Hear a sample", AutoSize = true };
+            sample.Location = new Point(ClientSize.Width - 20 - 150, y - 6);
+            sample.Click += delegate { Voice.Say("Hello! This is how I sound. See you on Wednesday, Niamh."); };
+            Controls.Add(sample);
+            y += 34;
+
+            Action fill = delegate
+            {
+                box.Items.Clear();
+                box.Items.Add("Windows voice (robotic, no download)");
+                foreach (NaturalVoice v in Voice.Catalog)
+                    box.Items.Add(v.Name + (Voice.IsInstalled(v) ? "  (natural)" : "  (natural, downloads about 60 MB)"));
+                NaturalVoice now = Voice.Find(Prefs.GetText("Voice", Voice.WindowsVoice));
+                box.SelectedIndex = now == null ? 0 : Array.IndexOf(Voice.Catalog, now) + 1;
+            };
+            fill();
+            status.Text = "Natural voices run on this computer; nothing you read is sent anywhere.";
+
+            box.SelectedIndexChanged += delegate
+            {
+                if (loading) return;
+                if (box.SelectedIndex <= 0)
+                {
+                    Prefs.SetText("Voice", Voice.WindowsVoice);
+                    Voice.Chosen = Voice.WindowsVoice;
+                    return;
+                }
+                NaturalVoice v = Voice.Catalog[box.SelectedIndex - 1];
+                if (Voice.IsInstalled(v))
+                {
+                    Prefs.SetText("Voice", v.Id); Voice.Chosen = v.Id;
+                    Voice.Say("Hello, I'm " + v.Name.Split(' ')[0] + ".");
+                    return;
+                }
+                box.Enabled = false;
+                status.Text = "Downloading " + v.Name + "... 0%";
+                var t = new System.Threading.Thread(delegate ()
+                {
+                    string err = Voice.Download(v, delegate (int pct)
+                    {
+                        BeginInvoke((Action)delegate { status.Text = "Downloading " + v.Name + "... " + pct + "%"; });
+                    });
+                    BeginInvoke((Action)delegate
+                    {
+                        box.Enabled = true;
+                        loading = true;
+                        if (err == null) { Prefs.SetText("Voice", v.Id); Voice.Chosen = v.Id; }
+                        fill();
+                        loading = false;
+                        if (err == null) { status.Text = v.Name + " is ready."; Voice.Say("Hello, I'm " + v.Name.Split(' ')[0] + ". This is how I sound."); }
+                        else status.Text = "Could not download it: " + err;
+                    });
+                });
+                t.IsBackground = true;
+                t.Start();
+            };
         }
 
         void Heading(string text)

@@ -18,7 +18,7 @@ static class SpellTest
             {"sykology","psychology"},{"fenomenon","phenomenon"},{"tomoro","tomorrow"},{"seperate","separate"},
             {"enuf","enough"},{"nite","night"},{"thru","through"},{"wensday","Wednesday"},{"kwik","quick"},
             {"fone","phone"},{"shure","sure"},{"ocashun","occasion"},{"reseet","receipt"},{"cof","cough"},
-            {"biznes","business"},{"choklit","chocolate"},{"lisen","listen"},{"naber","neighbour"},{"rithm","rhythm"},
+            {"biznes","business"},{"choklit","chocolate"},{"lisen","listen"},{"naber","neighbour|neighbor"},{"rithm","rhythm"},
             {"jiraf","giraffe"},{"kolij","college"},{"serprize","surprise"},{"beleev","believe"},{"frend","friend"},
             {"weerd","weird"},{"akomodate","accommodate"},{"enjineer","engineer"},{"eksperiens","experience"},
             {"orkestra","orchestra"},{"nolij","knowledge"},{"rong","wrong"},{"serkul","circle"},{"animul","animal"},
@@ -33,7 +33,7 @@ static class SpellTest
             {"bady","baby"},{"porblem","problem"},{"diffrint","different"},{"aftr","after"},{"libary","library"},
             {"gril","girl"},{"wnet","went"},{"sumtimes","sometimes"},{"evry","every"},{"ansur","answer"},
             // Irish and British spellings, Irish names and places, the Irish "th"
-            {"culer","colour"},{"favrit","favourite"},{"realyse","realise"},{"senter","centre"},{"theeater","theatre"},
+            {"culer","colour|color"},{"favrit","favourite|favorite"},{"realyse","realise|realize"},{"senter","centre|center"},{"theeater","theatre|theater"},
             {"neev","Niamh"},{"shivawn","Siobhán"},{"eefa","Aoife"},{"keeva","Caoimhe"},{"seersha","Saoirse"},
             {"osheen","Oisín"},{"keeran","Ciarán"},{"shawn","Seán"},{"rosheen","Róisín"},{"teeshock","Taoiseach"},
             {"droheda","Drogheda"},{"leesh","Laois"},{"gardee","Gardaí"},{"slawncha","Sláinte"},{"tink","think"},
@@ -44,8 +44,10 @@ static class SpellTest
         for (int i = 0; i < n; i++)
         {
             var s = sp.Suggest(cases[i, 0], 5);
-            bool hit = s.Count > 0 && s[0] == cases[i, 1];
-            bool in3 = s.IndexOf(cases[i, 1]) >= 0 && s.IndexOf(cases[i, 1]) < 3;
+            string[] want = cases[i, 1].Split('|');
+            bool hit = s.Count > 0 && Array.IndexOf(want, s[0]) >= 0;
+            bool in3 = false;
+            for (int j = 0; j < s.Count && j < 3; j++) if (Array.IndexOf(want, s[j]) >= 0) in3 = true;
             if (hit) ok++; if (in3) top3++;
             if (!hit) Console.WriteLine((in3 ? "  ~ " : "  X ") + cases[i, 0] + " -> " + string.Join(", ", s) + "   (want " + cases[i, 1] + ")");
         }
@@ -59,6 +61,12 @@ static class SpellTest
         good &= Expect("youre", First(sp.SuggestFull("youre", 5, null)), "you're");
         good &= Expect("wether after 'the'", First(sp.SuggestFull("wether", 5, "the")), "weather");
         good &= Expect("meaning shown", sp.SuggestFull("there", 5, null)[0].Meaning != null ? "yes" : "no", "yes");
+
+        // Right or wrong: both US and UK spellings count, and contractions.
+        foreach (string real in new[] { "colour", "color", "favourite", "favorite", "realise", "realize", "don't", "they're", "Niamh", "Siobhán", "Wednesday", "Ireland's" })
+            good &= Expect("is a word: " + real, sp.IsWord(real) ? "yes" : "no", "yes");
+        foreach (string bad in new[] { "nesesary", "wensday", "freind", "dont'", "teh" })
+            good &= Expect("not a word: " + bad, sp.IsWord(bad) ? "yes" : "no", "no");
 
         // Learning from picks: what she chose before comes first next time.
         good &= Expect("gril before learning", sp.Suggest("gril", 5)[0], "grill");

@@ -1,6 +1,7 @@
 // Watches keys system-wide. Fixes "@@word" when the word ends, fixes the word
-// just typed when the shortcut is pressed (tap Shift twice by default), and lets
-// her pick, hear, or undo from the popup.
+// just typed when the shortcut is pressed (tap Shift twice by default), fixes her
+// usual mistakes by themselves, keeps the sentence strip up to date, and reads
+// text out when Ctrl is tapped twice.
 //
 // Written for C# 5 so the csc.exe that ships inside Windows can compile it.
 
@@ -21,14 +22,17 @@ namespace SoundSpell
         const int WM_LBUTTONDOWN = 0x201, WM_RBUTTONDOWN = 0x204, WM_MBUTTONDOWN = 0x207;
         const int WM_KEYDOWN = 0x100, WM_SYSKEYDOWN = 0x104;
         const int VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0D, VK_SHIFT = 0x10, VK_CONTROL = 0x11,
-                  VK_MENU = 0x12, VK_CAPITAL = 0x14, VK_SPACE = 0x20, VK_LWIN = 0x5B, VK_RWIN = 0x5C,
+                  VK_MENU = 0x12, VK_CAPITAL = 0x14, VK_ESCAPE = 0x1B, VK_SPACE = 0x20, VK_LEFT = 0x25, VK_RIGHT = 0x27,
+                  VK_LWIN = 0x5B, VK_RWIN = 0x5C,
                   VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3, VK_LMENU = 0xA4, VK_RMENU = 0xA5;
         static readonly IntPtr Marker = new IntPtr(0x5350454C); // tags the keys we send ourselves
 
         static readonly Regex Trigger = new Regex(@"@@([\p{L}']{1,40})$", RegexOptions.Compiled);
         // The last word on the line and what was typed after it (spaces, punctuation).
         static readonly Regex LastWord = new Regex(@"(?<![\p{L}'@])([\p{L}']{2,40})([ .,;:!?)""]{0,3})$", RegexOptions.Compiled);
+        static readonly Regex EndWord = new Regex(@"(?<![\p{L}'@])([\p{L}']{2,40})$", RegexOptions.Compiled);
         static readonly Regex WordBefore = new Regex(@"([\p{L}']+)[^\p{L}']*$", RegexOptions.Compiled);
+        static readonly Regex Words = new Regex(@"[\p{L}'’]+", RegexOptions.Compiled);
 
         readonly TrayApp app;
         // What was typed lately on this line, as it is on screen. Cleared by Enter,
@@ -39,12 +43,15 @@ namespace SoundSpell
         IntPtr hook = IntPtr.Zero, mouseHook = IntPtr.Zero;
         IntPtr lastWindow = IntPtr.Zero;
         Popup popup;
+        SentenceStrip strip;
 
         // The last fix, which Ctrl+digit or a click can change while the popup is up.
         List<Suggestion> choices;
         string original;      // what was typed, without @@
-        string inserted;      // what is on screen now in place of it
-        string termText;      // what is on screen after it (" ", ". ", "" when held back)
+        string inserted;      // what is on screen now in its place
+        int fixStart;         // where `inserted` starts in `recent`
+        bool autoFixed;       // it was one of her usual mistakes, fixed by itself
+        bool pendingAccept;   // a fix she has not changed yet; kept if she types on
 
         // Matches shown while @@word is still being typed.
         string liveWord;
@@ -57,12 +64,22 @@ namespace SoundSpell
         readonly AutoResetEvent lookupWake = new AutoResetEvent(false);
         string lookupWanted, lookupPrevious;
 
+        // The strip is worked out on another worker (finding the caret can be slow).
+        readonly object stripLock = new object();
+        readonly AutoResetEvent stripWake = new AutoResetEvent(false);
+        string stripText;
+        int stripVersion;
+        Rectangle lastCaret = Rectangle.Empty;
+
         // Shortcut taps: a key pressed and let go with nothing else in between.
-        bool shiftClean, rctrlClean;
-        DateTime lastShiftTap = DateTime.MinValue;
+        bool shiftClean, rctrlClean, lctrlClean;
+        DateTime lastShiftTap = DateTime.MinValue, lastCtrlTap = DateTime.MinValue;
 
         public bool Enabled = true;
         public bool AutoReplace = true;
+        public bool AutoFix = true;
+        public bool StripOn = true;
+        public bool ReadOnCtrl = true;
         public string Hotkey = Prefs.Hotkeys[0];
 
         public KeyWatcher(TrayApp app)
@@ -76,9 +93,12 @@ namespace SoundSpell
         {
             hook = Native.SetWindowsHookEx(WH_KEYBOARD_LL, proc, Native.GetModuleHandle(null), 0);
             mouseHook = Native.SetWindowsHookEx(WH_MOUSE_LL, mouseProc, Native.GetModuleHandle(null), 0);
-            var worker = new Thread(LookupLoop);
-            worker.IsBackground = true;
-            worker.Start();
+            foreach (ThreadStart work in new ThreadStart[] { LookupLoop, StripLoop })
+            {
+                var t = new Thread(work);
+                t.IsBackground = true;
+                t.Start();
+            }
         }
 
         public void Stop()
@@ -89,7 +109,7 @@ namespace SoundSpell
         }
 
         // A click can move the text cursor, so whatever was being typed no longer counts
-        // (unless the click is on the popup itself).
+        // (unless the click is on the popup or the strip).
         IntPtr MouseProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0)
@@ -98,11 +118,13 @@ namespace SoundSpell
                 if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
                 {
                     var pt = (Native.POINT)Marshal.PtrToStructure(lParam, typeof(Native.POINT));
-                    bool onPopup = popup != null && popup.ScreenBounds.Contains(pt.x, pt.y);
-                    if (!onPopup)
+                    bool ours = (popup != null && popup.ScreenBounds.Contains(pt.x, pt.y))
+                             || (strip != null && strip.ScreenBounds.Contains(pt.x, pt.y));
+                    if (!ours)
                     {
                         recent.Length = 0;
-                        if (popupUp) CloseAll();
+                        CloseAll();
+                        HideStrip();
                     }
                 }
             }
@@ -139,24 +161,24 @@ namespace SoundSpell
             return Native.CallNextHookEx(hook, nCode, wParam, lParam);
         }
 
-        // "Tap Shift twice" and "Tap right Ctrl": the key goes down and up with no
-        // other key in between, so Shift+letter for capitals never counts.
+        // Taps: the key goes down and up with no other key in between, so Shift for a
+        // capital or Ctrl for Ctrl+C never counts.
         void WatchTaps(int vk, bool isDown, bool wasDown)
         {
             bool shift = vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_SHIFT;
             if (isDown)
             {
                 if (wasDown) return; // held down, repeating
-                if (shift) shiftClean = true;
-                else if (vk == VK_RCONTROL) rctrlClean = true;
-                else { shiftClean = false; rctrlClean = false; lastShiftTap = DateTime.MinValue; }
+                shiftClean = shift; rctrlClean = vk == VK_RCONTROL; lctrlClean = vk == VK_LCONTROL;
+                if (!shift) lastShiftTap = DateTime.MinValue;
+                if (vk != VK_LCONTROL) lastCtrlTap = DateTime.MinValue;
                 return;
             }
+            DateTime now = DateTime.UtcNow;
             if (shift && shiftClean)
             {
                 shiftClean = false;
                 if (Hotkey != Prefs.Hotkeys[0]) return;
-                DateTime now = DateTime.UtcNow;
                 if ((now - lastShiftTap).TotalMilliseconds < 450) { lastShiftTap = DateTime.MinValue; FixLastWord(); }
                 else lastShiftTap = now;
             }
@@ -164,6 +186,13 @@ namespace SoundSpell
             {
                 rctrlClean = false;
                 if (Hotkey == Prefs.Hotkeys[2]) FixLastWord();
+            }
+            else if (vk == VK_LCONTROL && lctrlClean)
+            {
+                lctrlClean = false;
+                if (!ReadOnCtrl) return;
+                if ((now - lastCtrlTap).TotalMilliseconds < 450) { lastCtrlTap = DateTime.MinValue; string s = CurrentSentence(); app.Post(delegate { app.ReadAloud(s); }); }
+                else lastCtrlTap = now;
             }
         }
 
@@ -193,7 +222,7 @@ namespace SoundSpell
             if (IsModifier(vk)) return false;
 
             IntPtr fg = Native.GetForegroundWindow();
-            if (fg != lastWindow) { lastWindow = fg; recent.Length = 0; CloseAll(); }
+            if (fg != lastWindow) { lastWindow = fg; recent.Length = 0; CloseAll(); HideStrip(); }
 
             bool ctrl = Down(VK_CONTROL), alt = Down(VK_MENU), win = Down(VK_LWIN) || Down(VK_RWIN), shift = Down(VK_SHIFT);
             bool altGr = ctrl && alt && Down(VK_RMENU);
@@ -215,12 +244,14 @@ namespace SoundSpell
             // Anything else typed means the last fix is settled.
             if (choices != null) CloseAll();
 
-            if ((ctrl || alt || win) && !altGr) { recent.Length = 0; CloseAll(); return false; }
+            if ((ctrl || alt || win) && !altGr) { recent.Length = 0; CloseAll(); HideStrip(); return false; }
+            if (vk == VK_ESCAPE) { CloseAll(); HideStrip(); return false; }
 
             if (vk == VK_BACK)
             {
                 if (recent.Length > 0) recent.Length--;
                 UpdateLive();
+                StripChanged();
                 return false;
             }
             if (vk == VK_RETURN) return TryFix("", VK_RETURN);
@@ -228,28 +259,43 @@ namespace SoundSpell
             if (vk == VK_SPACE) return TryFix(" ", VK_SPACE);
 
             char c = Translate(vk, scan, fg);
-            if (c == '\0') { recent.Length = 0; CloseAll(); return false; } // arrows, Home, Esc, dead keys...
+            if (c == '\0') { recent.Length = 0; CloseAll(); HideStrip(); return false; } // arrows, Home, dead keys...
 
             if (char.IsLetter(c) || c == '\'' || c == '@')
             {
                 Remember(c.ToString());
                 UpdateLive();
+                StripChanged();
                 return false;
             }
-            if (char.IsControl(c)) { recent.Length = 0; CloseAll(); return false; }
+            if (char.IsControl(c)) { recent.Length = 0; CloseAll(); HideStrip(); return false; }
             return TryFix(c.ToString(), 0);
         }
 
         void Remember(string s)
         {
             recent.Append(s);
-            if (recent.Length > 200) recent.Remove(0, recent.Length - 200);
+            if (recent.Length > 300) recent.Remove(0, recent.Length - 300);
         }
 
         string PreviousWord(int end)
         {
             Match m = WordBefore.Match(recent.ToString(0, Math.Max(0, Math.Min(end, recent.Length))));
             return m.Success ? m.Groups[1].Value : null;
+        }
+
+        // The sentence being typed: everything after the last . ! or ? on the line.
+        static int SentenceStart(string text)
+        {
+            for (int i = text.Length - 2; i >= 0; i--)
+                if ((text[i] == '.' || text[i] == '!' || text[i] == '?') && char.IsWhiteSpace(text[i + 1])) return i + 1;
+            return 0;
+        }
+
+        string CurrentSentence()
+        {
+            string text = recent.ToString();
+            return text.Substring(SentenceStart(text)).Replace("@@", "").Trim();
         }
 
         // The live list, if it is for exactly what is typed after @@ right now.
@@ -266,9 +312,16 @@ namespace SoundSpell
         {
             if (choices != null)
             {
-                if (r == -1) { Pick(original, true); return true; }
-                if (r >= 0 && r < choices.Count) { Pick(choices[r].Word, false); return true; }
-                return false;
+                if (r == -1)
+                {
+                    if (autoFixed) app.RemoveAutoFix(original); // she did not want this one fixed
+                    Pick(original, true);
+                    return true;
+                }
+                if (r < 0 || r >= choices.Count) return false;
+                if (choices[r].AddToMyWords) { app.AddMyWord(choices[r].Word); pendingAccept = false; CloseAll(); StripChanged(); return true; }
+                Pick(choices[r].Word, false);
+                return true;
             }
             Match live = Trigger.Match(recent.ToString());
             List<Suggestion> list = LiveList();
@@ -276,7 +329,7 @@ namespace SoundSpell
             // Picked while still typing @@word: that is the final choice.
             string word = list[r].Word;
             string typed = live.Groups[1].Value.TrimEnd('\'');
-            ReplaceAt(live.Index, word, "", 0);
+            Replace(live.Index, live.Length, word, "", 0);
             app.Learn(typed, word);
             CloseAll();
             app.Post(delegate { app.Say(word); });
@@ -322,14 +375,15 @@ namespace SoundSpell
                     liveFoundFor = word;
                     ShowPopup(found, 0, AutoReplace
                         ? "Space: use 1     Ctrl+number or click: pick     point: hear"
-                        : "Ctrl+number or click: put that word in     point: hear");
+                        : "Ctrl+number or click: put that word in     point: hear", null);
                 });
             }
         }
 
-        // The word just ended with `term`. If it was @@word, swap it.
-        // Enter and Tab are held back, so fixing a word never sends a message
-        // or leaves the box; the next Enter does that as usual.
+        // A word just ended with `term` (a space, punctuation, Enter or Tab).
+        // @@word is swapped; one of her usual mistakes is fixed by itself.
+        // Enter and Tab after @@word are held back, so fixing a word never sends a
+        // message or leaves the box; the next Enter does that as usual.
         bool TryFix(string term, int termVk)
         {
             Match m = Trigger.Match(recent.ToString());
@@ -337,22 +391,33 @@ namespace SoundSpell
             List<Suggestion> found = word.Length > 0 && word == liveFoundFor ? liveFound : null;
             liveWord = null; liveFound = null; liveFoundFor = null;
             Speller sp = app.Speller;
-            if (word.Length > 0 && found == null && sp != null) found = sp.SuggestFull(word, 5, PreviousWord(m.Index));
-            if (word.Length == 0 || found == null || found.Count == 0)
+
+            if (word.Length == 0)
             {
-                if (termVk == VK_RETURN || termVk == VK_TAB) recent.Length = 0; else Remember(term);
+                if (AutoFix && sp != null && TryAutoFix(term, termVk)) return true;
                 CloseAll();
+                if (termVk == VK_RETURN || termVk == VK_TAB) { recent.Length = 0; HideStrip(); }
+                else { Remember(term); StripChanged(); }
+                return false;
+            }
+            if (found == null && sp != null) found = sp.SuggestFull(word, 5, PreviousWord(m.Index));
+            if (found == null || found.Count == 0)
+            {
+                CloseAll();
+                if (termVk == VK_RETURN || termVk == VK_TAB) recent.Length = 0; else Remember(term);
                 return false;
             }
 
             CloseAll();
             original = word;
+            fixStart = m.Index;
             if (AutoReplace)
             {
-                ReplaceAt(m.Index, found[0].Word, term, termVk);
+                Replace(m.Index, m.Length, found[0].Word, term, 0);
                 choices = found;
+                pendingAccept = true;
                 ShowPopup(found, 1, (termVk == VK_RETURN ? "Enter: send     " : "") +
-                    "Ctrl+number or click: pick another     Ctrl+0: keep \"" + word + "\"");
+                    "Ctrl+number or click: pick another     Ctrl+0: keep \"" + word + "\"", null);
                 string said = found[0].Word;
                 app.Post(delegate { app.Say(said); });
             }
@@ -367,71 +432,159 @@ namespace SoundSpell
                     Remember(term);
                 }
                 inserted = m.Value;
-                termText = term;
                 choices = found;
-                ShowPopup(found, 0, "Ctrl+number or click: put that word in     point: hear");
+                ShowPopup(found, 0, "Ctrl+number or click: put that word in     point: hear", null);
             }
+            StripChanged();
             return true;
         }
 
-        // Fix the word just before the cursor (the shortcut). Returns false if there
-        // is no word there that we know about.
+        // One of her usual mistakes (see TrayApp.Learn): fix it as the word ends.
+        bool TryAutoFix(string term, int termVk)
+        {
+            Match m = EndWord.Match(recent.ToString());
+            if (!m.Success) return false;
+            string word = m.Groups[1].Value.Trim('\'');
+            string fix = app.AutoFixFor(word);
+            if (fix == null) return false;
+            fix = Speller.MatchCase(word, fix);
+            if (fix == word) return false;
+
+            CloseAll();
+            original = word;
+            fixStart = m.Index;
+            bool enter = termVk == VK_RETURN || termVk == VK_TAB;
+            Replace(m.Index, m.Length, fix, term, enter ? termVk : 0);
+            if (enter) { recent.Length = 0; HideStrip(); return true; } // sent: nothing left to change
+            autoFixed = true;
+            pendingAccept = true;
+            var list = new List<Suggestion> { new Suggestion(fix, "fixed by itself") };
+            foreach (Suggestion s in app.Speller.SuggestFull(word, 5, PreviousWord(m.Index)))
+                if (!string.Equals(s.Word, fix, StringComparison.OrdinalIgnoreCase)) list.Add(s);
+            choices = list;
+            ShowPopup(list, 1, "Fixed by itself     Ctrl+number or click: pick another     Ctrl+0: keep \"" + word + "\"", null);
+            app.Post(delegate { app.Say(fix); });
+            StripChanged();
+            return true;
+        }
+
+        // The shortcut: fix the word just before the cursor, or, if that one is fine,
+        // the nearest red word earlier in the sentence.
         bool FixLastWord()
         {
             Speller sp = app.Speller;
             if (sp == null) return false;
             string text = recent.ToString();
             Match m = LastWord.Match(text);
-            if (!m.Success) return false;
-            string word = m.Groups[1].Value.Trim('\'');
-            string after = m.Groups[2].Value;
-            if (word.Length < 2) return false;
-            List<Suggestion> found = sp.SuggestFull(word, 5, PreviousWord(m.Index));
+            if (m.Success && !sp.IsWord(m.Groups[1].Value) || !m.Success)
+            {
+                if (!m.Success) return FixRedWordBefore(text.Length);
+                return FixAt(m.Groups[1].Index, m.Groups[1].Value.Trim('\''));
+            }
+            if (StripOn && FixRedWordBefore(m.Index)) return true;
+            return FixAt(m.Groups[1].Index, m.Groups[1].Value.Trim('\''));
+        }
+
+        bool FixRedWordBefore(int end)
+        {
+            Speller sp = app.Speller;
+            string text = recent.ToString();
+            int start = SentenceStart(text);
+            StripWord red = null;
+            foreach (StripWord w in SentenceWords(text, sp))
+                if (w.State == WordState.Bad && w.Start + w.Text.Length <= end && w.Start >= start) red = w;
+            return red != null && FixAt(red.Start, red.Text);
+        }
+
+        // Replace the word at `start` in the line with its best match, and show the others.
+        bool FixAt(int start, string word, Point? listAt = null)
+        {
+            Speller sp = app.Speller;
+            if (sp == null || word.Length < 2) return false;
+            List<Suggestion> found = sp.SuggestFull(word, 5, PreviousWord(start));
             if (found.Count == 0) return false;
+            if (!sp.IsWord(word))
+                found.Add(new Suggestion(word, "add to My words") { AddToMyWords = true });
 
             CloseAll();
             original = word;
-            if (found[0].Word != word) ReplaceAt(m.Index, found[0].Word, after, 0);
-            else { inserted = word; termText = after; }
+            fixStart = start;
+            if (found[0].Word != word) Replace(start, word.Length, found[0].Word, "", 0);
+            else inserted = word;
             choices = found;
-            ShowPopup(found, 1, "Ctrl+number or click: pick another     Ctrl+0: keep \"" + word + "\"");
+            pendingAccept = true;
+            ShowPopup(found, 1, "Ctrl+number or click: pick another     Ctrl+0: keep \"" + word + "\"", listAt);
             string said = found[0].Word;
             app.Post(delegate { app.Say(said); });
+            StripChanged();
             return true;
         }
 
-        // Swap everything typed from `start` to the cursor for `word`, then `term`.
-        void ReplaceAt(int start, string word, string term, int termVk)
+        // A word on the strip was clicked: fix that one.
+        void OnStripWord(StripWord w)
         {
+            string text = recent.ToString();
+            if (w.Start + w.Text.Length > text.Length || text.Substring(w.Start, w.Text.Length) != w.Text) return; // line changed
+            Point below = strip.Below(w);
+            FixAt(w.Start, w.Text.Trim('\''), below);
+        }
+
+        // Puts `word` on screen in place of recent[start .. start+len], then types
+        // `after` (and presses `vkAfter`) at the end of the line. When only a space or
+        // punctuation follows the word, it is rubbed out and typed again; when more
+        // follows, the cursor steps back to the word with the arrow keys and returns.
+        void Replace(int start, int len, string word, string after, int vkAfter)
+        {
+            start = Math.Max(0, Math.Min(start, recent.Length));
+            len = Math.Min(len, recent.Length - start);
+            string tail = recent.ToString(start + len, recent.Length - start - len);
             var keys = new List<Native.INPUT>();
-            for (int i = start; i < recent.Length; i++) AddVk(keys, VK_BACK);
-            AddText(keys, word);
-            if (term == " ") AddVk(keys, VK_SPACE); else AddText(keys, term);
+            bool shortTail = tail.Length <= 3 && !Regex.IsMatch(tail, @"[\p{L}\d]");
+            if (shortTail)
+            {
+                for (int i = 0; i < len + tail.Length; i++) AddVk(keys, VK_BACK);
+                AddText(keys, word);
+                TypeText(keys, tail);
+            }
+            else
+            {
+                for (int i = 0; i < tail.Length; i++) AddVk(keys, VK_LEFT, true);
+                for (int i = 0; i < len; i++) AddVk(keys, VK_BACK);
+                AddText(keys, word);
+                for (int i = 0; i < tail.Length; i++) AddVk(keys, VK_RIGHT, true);
+            }
+            TypeText(keys, after);
+            if (vkAfter != 0) AddVk(keys, vkAfter);
             SendLater(keys);
-            recent.Length = Math.Min(start, recent.Length);
-            Remember(word + term);
+            recent.Remove(start, len);
+            recent.Insert(start, word);
+            Remember(after);
             inserted = word;
-            termText = term;
+            fixStart = start;
+        }
+
+        static void TypeText(List<Native.INPUT> keys, string text)
+        {
+            foreach (char ch in text) { if (ch == ' ') AddVk(keys, VK_SPACE); else AddText(keys, ch.ToString()); }
         }
 
         void Pick(string word, bool keep)
         {
-            var keys = new List<Native.INPUT>();
-            int erase = inserted.Length + termText.Length;
-            for (int i = 0; i < erase; i++) AddVk(keys, VK_BACK);
-            AddText(keys, word);
-            AddText(keys, termText);
-            SendLater(keys);
-            recent.Length = Math.Max(0, recent.Length - erase);
-            Remember(word + termText);
+            pendingAccept = false;
+            if (inserted != null && fixStart + inserted.Length <= recent.Length && recent.ToString(fixStart, inserted.Length) == inserted)
+                Replace(fixStart, inserted.Length, word, "", 0);
             app.Learn(original, keep ? original : word);
-            inserted = word;
             CloseAll();
+            StripChanged();
             app.Post(delegate { app.Say(word); });
         }
 
         void CloseAll()
         {
+            // A fix she did not change counts as a pick of that word.
+            if (pendingAccept && original != null && inserted != null) app.Learn(original, inserted);
+            pendingAccept = false;
+            autoFixed = false;
             choices = null;
             liveWord = null; liveFound = null; liveFoundFor = null;
             if (!popupUp) return;
@@ -439,10 +592,10 @@ namespace SoundSpell
             app.Post(delegate { if (popup != null) popup.HideNow(); });
         }
 
-        void ShowPopup(List<Suggestion> found, int current, string footer)
+        void ShowPopup(List<Suggestion> found, int current, string footer, Point? at)
         {
             popupUp = true;
-            Point at = CaretPoint();
+            Point where = at ?? CaretPoint();
             var list = new List<Suggestion>(found);
             app.Post(delegate
             {
@@ -454,25 +607,115 @@ namespace SoundSpell
                     popup.RowClicked += delegate (int r) { PickRow(r); };
                     popup.RowPointed += delegate (int r) { if (app.HearOnPoint) HearRow(r); };
                 }
-                popup.ShowChoices(list, current, footer, at);
+                popup.ShowChoices(list, current, footer, where);
             });
         }
 
-        static Point CaretPoint()
+        // Just under the caret. Uses the quick Win32 answer, or where the strip worker
+        // last found the caret, or the mouse.
+        Point CaretPoint()
         {
+            bool exact;
+            Rectangle r = QuickCaret(out exact);
+            if (!r.IsEmpty) return new Point(r.Left, r.Bottom + 4);
+            Point c = Cursor.Position;
+            return new Point(c.X + 12, c.Y + 20);
+        }
+
+        Rectangle QuickCaret(out bool exact)
+        {
+            exact = true;
             IntPtr fg = Native.GetForegroundWindow();
             uint tid = Native.GetWindowThreadProcessId(fg, IntPtr.Zero);
             var gti = new Native.GUITHREADINFO();
             gti.cbSize = Marshal.SizeOf(typeof(Native.GUITHREADINFO));
             if (Native.GetGUIThreadInfo(tid, ref gti) && gti.hwndCaret != IntPtr.Zero)
             {
-                var p = new Native.POINT { x = gti.rcCaret.left, y = gti.rcCaret.bottom };
+                var p = new Native.POINT { x = gti.rcCaret.left, y = gti.rcCaret.top };
                 Native.ClientToScreen(gti.hwndCaret, ref p);
-                return new Point(p.x, p.y + 4);
+                return new Rectangle(p.x, p.y, 1, Math.Max(8, gti.rcCaret.bottom - gti.rcCaret.top));
             }
-            Point c = Cursor.Position;
-            return new Point(c.X + 12, c.Y + 20);
+            lock (stripLock) return lastCaret;
         }
+
+        // ---- the sentence strip ------------------------------------------------------
+
+        void StripChanged()
+        {
+            if (!StripOn) return;
+            lock (stripLock) { stripText = recent.ToString(); stripVersion++; }
+            stripWake.Set();
+        }
+
+        void HideStrip()
+        {
+            lock (stripLock) { stripText = null; stripVersion++; }
+            app.Post(delegate { if (strip != null) strip.HideNow(); });
+        }
+
+        // The words of the sentence being typed, each marked right, wrong, a name, or
+        // still being typed.
+        static List<StripWord> SentenceWords(string text, Speller sp)
+        {
+            var list = new List<StripWord>();
+            int from = SentenceStart(text);
+            bool first = true;
+            foreach (Match m in Words.Matches(text, from))
+            {
+                if (m.Index >= 2 && text[m.Index - 1] == '@' && text[m.Index - 2] == '@') continue; // @@word has its own list
+                string w = m.Value.Trim('\'', '’');
+                if (w.Length == 0) continue;
+                var sw = new StripWord { Text = m.Value, Start = m.Index };
+                if (m.Index + m.Length == text.Length) sw.State = WordState.Typing;
+                else if (sp == null || sp.IsWord(w) || w.Length == 1) sw.State = WordState.Good;
+                else if (!first && char.IsUpper(w[0])) sw.State = WordState.Name;
+                else sw.State = WordState.Bad;
+                list.Add(sw);
+                first = false;
+            }
+            return list;
+        }
+
+        void StripLoop()
+        {
+            while (true)
+            {
+                stripWake.WaitOne();
+                Thread.Sleep(40); // let a burst of keys settle
+                string text; int version;
+                lock (stripLock) { text = stripText; version = stripVersion; }
+                if (text == null) continue;
+                List<StripWord> words = SentenceWords(text, app.Speller);
+                bool exact;
+                Rectangle caret = Caret.Find(out exact);
+                if (caret.IsEmpty)
+                {
+                    Native.RECT wr;
+                    if (Native.GetWindowRect(Native.GetForegroundWindow(), out wr))
+                        caret = new Rectangle(wr.left + 40, wr.bottom - 70, 1, 20);
+                    exact = false;
+                }
+                lock (stripLock)
+                {
+                    if (exact) lastCaret = caret;
+                    if (version != stripVersion) continue; // more typing already
+                }
+                app.Post(delegate
+                {
+                    lock (stripLock) { if (version != stripVersion) return; }
+                    if (strip == null || strip.IsDisposed)
+                    {
+                        strip = new SentenceStrip();
+                        strip.WordClicked += OnStripWord;
+                        strip.SpeakerClicked += delegate { app.ReadAloud(CurrentSentence(), true); };
+                    }
+                    if (words.Count == 0) { strip.HideNow(); return; }
+                    strip.ShowWords(words, caret, exact);
+                });
+            }
+        }
+
+        // ---- keys ------------------------------------------------------------------------
 
         char Translate(int vk, int scan, IntPtr fg)
         {
@@ -507,6 +750,17 @@ namespace SoundSpell
                     ReplayQueued();
                 }
             });
+        }
+
+        // Copies the selection with Ctrl+C (for reading it out).
+        public void SendCopy()
+        {
+            var keys = new List<Native.INPUT>();
+            keys.Add(Key((ushort)VK_LCONTROL, 0, 0));
+            keys.Add(Key((ushort)'C', 0, 0));
+            keys.Add(Key((ushort)'C', 0, Native.KEYEVENTF_KEYUP));
+            keys.Add(Key((ushort)VK_LCONTROL, 0, Native.KEYEVENTF_KEYUP));
+            SendLater(keys);
         }
 
         void ReplayQueued()
@@ -547,10 +801,13 @@ namespace SoundSpell
             if (keys.Count > 0) Send(keys);
         }
 
-        static void AddVk(List<Native.INPUT> keys, int vk)
+        static void AddVk(List<Native.INPUT> keys, int vk) { AddVk(keys, vk, false); }
+
+        static void AddVk(List<Native.INPUT> keys, int vk, bool extended)
         {
-            keys.Add(Key((ushort)vk, 0, 0));
-            keys.Add(Key((ushort)vk, 0, Native.KEYEVENTF_KEYUP));
+            uint ext = extended ? Native.KEYEVENTF_EXTENDEDKEY : 0;
+            keys.Add(Key((ushort)vk, 0, ext));
+            keys.Add(Key((ushort)vk, 0, ext | Native.KEYEVENTF_KEYUP));
         }
 
         static void AddText(List<Native.INPUT> keys, string text)

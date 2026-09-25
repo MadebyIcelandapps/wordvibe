@@ -15,6 +15,7 @@ namespace SoundSpell
     {
         public string Word;
         public string Meaning;   // null when there is nothing to tell apart
+        public bool AddToMyWords; // the "add this word to My words" row, not a replacement
         public Suggestion(string word, string meaning) { Word = word; Meaning = meaning; }
         public override string ToString() { return Meaning == null ? Word : Word + "  (" + Meaning + ")"; }
     }

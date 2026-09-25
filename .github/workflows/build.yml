@@ -24,6 +24,19 @@ jobs:
         run: ./build.ps1
       - name: Try it in Notepad
         run: ./test/e2e.ps1
+      - name: Natural voice downloads and speaks
+        run: |
+          # Every voice in the list can be downloaded.
+          $urls = Select-String -Path src/Voice.cs -Pattern 'new NaturalVoice\("([^"]+)", "[^"]+", "([^"]+)"\)' -AllMatches |
+            ForEach-Object { $_.Matches } | ForEach-Object { "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/$($_.Groups[2].Value)/$($_.Groups[1].Value).onnx" }
+          foreach ($u in $urls) { $r = Invoke-WebRequest $u -Method Head -UseBasicParsing; Write-Host "$($r.StatusCode) $u" }
+          # One voice, all the way to a WAV file.
+          $wav = Join-Path $env:TEMP 'voice-test.wav'
+          $p = Start-Process ./SoundSpell.exe -ArgumentList '--voice-test', 'en_GB-cori-medium', "`"$wav`"", '"Hello Niamh, see you on Wednesday."' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "voice test failed with $($p.ExitCode)" }
+          $size = (Get-Item $wav).Length
+          Write-Host "spoke $size bytes of audio"
+          if ($size -lt 20000) { throw 'audio too short' }
       - name: Update from GitHub, then uninstall
         run: |
           ./update.ps1 -Ref ${{ github.sha }}
@@ -46,3 +59,9 @@ jobs:
         with:
           name: SoundSpell
           path: pkg
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: strip.png
+          if-no-files-found: ignore

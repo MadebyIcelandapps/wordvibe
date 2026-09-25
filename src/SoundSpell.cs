@@ -12,7 +12,6 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Reflection;
-using System.Speech.Synthesis;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -25,16 +24,20 @@ namespace SoundSpell
     static class Program
     {
         [STAThread]
-        static void Main()
+        static int Main(string[] args)
         {
+            // For the automatic checks: SoundSpell.exe --voice-test <voice id> <out.wav> <text>
+            if (args.Length == 4 && args[0] == "--voice-test") return Voice.SelfTest(args[1], args[3], args[2]);
+
             bool first;
             using (var only = new Mutex(true, @"Local\SoundSpell.Tray", out first))
             {
-                if (!first) return;
+                if (!first) return 0;
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new TrayApp());
             }
+            return 0;
         }
     }
 
@@ -48,11 +51,11 @@ namespace SoundSpell
         SettingsForm settingsForm;
         volatile Speller speller;
         ToolStripMenuItem enabledItem;
-        SpeechSynthesizer voice;
         FileSystemWatcher myWordsWatcher;
+        readonly Dictionary<string, string> autoFixes = new Dictionary<string, string>(StringComparer.Ordinal);
         string updateReady;
 
-        public bool ReadAloud, HearOnPoint;
+        public bool SayFixed, HearOnPoint;
 
         public TrayApp()
         {
@@ -73,6 +76,7 @@ namespace SoundSpell
             watcher.Start();
 
             // Load the word list off the UI thread so the tray icon appears at once.
+            LoadAutoFixes();
             Reload();
             WatchMyWords();
 
@@ -102,9 +106,13 @@ namespace SoundSpell
             watcher.Enabled = Prefs.Get("Enabled", true);
             watcher.AutoReplace = Prefs.Get("AutoReplace", true);
             watcher.Hotkey = Prefs.Hotkey;
-            ReadAloud = Prefs.Get("ReadAloud", false);
+            watcher.AutoFix = Prefs.Get("AutoFix", true);
+            watcher.StripOn = Prefs.Get("Strip", true);
+            watcher.ReadOnCtrl = Prefs.Get("ReadOnCtrl", true);
+            SayFixed = Prefs.Get("ReadAloud", false);
             HearOnPoint = Prefs.Get("HearOnPoint", true);
-            if (voice != null) voice.Rate = Prefs.GetText("VoiceSpeed", "Slow") == "Slow" ? -3 : 0;
+            Voice.Chosen = Prefs.GetText("Voice", Voice.WindowsVoice);
+            Voice.Slow = Prefs.GetText("VoiceSpeed", "Slow") == "Slow";
             Theme.Load();
             string key = watcher.Hotkey == "None" ? "type @@ before a word" : watcher.Hotkey.ToLowerInvariant() + " after a word";
             tray.Text = "SoundSpell: " + key;
@@ -122,6 +130,7 @@ namespace SoundSpell
         // Her own words (names, places, school words) go first in the list.
         public static string MyWordsPath { get { return DataPath("my-words.txt"); } }
         static string PicksPath { get { return DataPath("picks.txt"); } }
+        public static string AutoFixPath { get { return DataPath("auto-fixes.txt"); } }
 
         void Reload()
         {
@@ -142,15 +151,18 @@ namespace SoundSpell
             myWordsWatcher.EnableRaisingEvents = true;
         }
 
+        static void EditMyWordsHeader()
+        {
+            File.WriteAllText(MyWordsPath,
+                "# Your own words, one per line: names, places, words from school.\r\n" +
+                "# They come first in the suggestions. Save the file and they work straight away.\r\n" +
+                "# Add how a word sounds after = to help it be found, like: Niamh=neev\r\n", new UTF8Encoding(false));
+        }
+
         void EditMyWords()
         {
-            string path = MyWordsPath;
-            if (!File.Exists(path))
-                File.WriteAllText(path,
-                    "# Your own words, one per line: names, places, words from school.\r\n" +
-                    "# They come first in the suggestions. Save the file and they work straight away.\r\n" +
-                    "# Add how a word sounds after = to help it be found, like: Niamh=neev\r\n");
-            System.Diagnostics.Process.Start("notepad.exe", "\"" + path + "\"");
+            if (!File.Exists(MyWordsPath)) EditMyWordsHeader();
+            System.Diagnostics.Process.Start("notepad.exe", "\"" + MyWordsPath + "\"");
         }
 
         static TextReader Resource(string name)
@@ -193,33 +205,133 @@ namespace SoundSpell
                 try { using (var w = new StreamWriter(PicksPath, false, new UTF8Encoding(false))) sp.SavePicks(w); }
                 catch (IOException) { }
             });
+            // The same fix three times: from now on it happens by itself.
+            string key = Speller.Plain(typed);
+            if (Prefs.Get("AutoFix", true) && chosen != typed && !sp.IsWord(typed) && !autoFixes.ContainsKey(key)
+                && sp.Picked(typed, chosen) >= 3)
+            {
+                autoFixes[key] = chosen;
+                SaveAutoFixes();
+                Post(delegate
+                {
+                    tray.ShowBalloonTip(8000, "Fixed by itself from now on",
+                        "\"" + typed + "\" will turn into \"" + chosen + "\" as you type.\nCtrl+0 right after puts it back and stops this.",
+                        ToolTipIcon.Info);
+                });
+            }
+        }
+
+        // ---- her usual mistakes, fixed by themselves (auto-fixes.txt: typed=fixed) ----
+
+        void LoadAutoFixes()
+        {
+            autoFixes.Clear();
+            try
+            {
+                if (!File.Exists(AutoFixPath)) return;
+                foreach (string line in File.ReadAllLines(AutoFixPath, Encoding.UTF8))
+                {
+                    string l = line.Trim();
+                    int eq = l.IndexOf('=');
+                    if (l.Length == 0 || l[0] == '#' || eq <= 0) continue;
+                    autoFixes[Speller.Plain(l.Substring(0, eq))] = l.Substring(eq + 1).Trim(); // empty: never fix this one
+                }
+            }
+            catch (IOException) { }
+        }
+
+        void SaveAutoFixes()
+        {
+            var sb = new StringBuilder();
+            sb.Append("# Words fixed by themselves as you type: typed=fixed. A line with nothing after = means never fix that word.\r\n");
+            foreach (var kv in autoFixes) sb.Append(kv.Key).Append('=').Append(kv.Value).Append("\r\n");
+            try { File.WriteAllText(AutoFixPath, sb.ToString(), new UTF8Encoding(false)); } catch (IOException) { }
+        }
+
+        public string AutoFixFor(string word)
+        {
+            string fix;
+            Speller sp = speller;
+            if (sp == null || sp.IsWord(word)) return null; // never touch a real word
+            return autoFixes.TryGetValue(Speller.Plain(word), out fix) && fix.Length > 0 ? fix : null;
+        }
+
+        public void RemoveAutoFix(string word)
+        {
+            autoFixes[Speller.Plain(word)] = "";
+            SaveAutoFixes();
+        }
+
+        public void EditAutoFixes()
+        {
+            if (!File.Exists(AutoFixPath)) SaveAutoFixes();
+            var p = System.Diagnostics.Process.Start("notepad.exe", "\"" + AutoFixPath + "\"");
+            if (p != null) { p.EnableRaisingEvents = true; p.Exited += delegate { Post(LoadAutoFixes); }; }
+        }
+
+        public void AddMyWord(string word)
+        {
+            try
+            {
+                if (!File.Exists(MyWordsPath)) EditMyWordsHeader();
+                File.AppendAllText(MyWordsPath, word + "\r\n", new UTF8Encoding(false));
+            }
+            catch (IOException) { }
         }
 
         // ---- speech --------------------------------------------------------------
 
-        public void Say(string word) { if (ReadAloud) SayNow(word); }
+        public void Say(string word) { if (SayFixed) SayNow(word); }
 
-        public void SayNow(string word)
+        public void SayNow(string word) { Voice.Say(word); }
+
+        // Tap Ctrl twice: read out the selected text, or else the sentence being typed.
+        // A second double tap while it is reading stops it.
+        public void ReadAloud(string sentence, bool sentenceOnly = false)
         {
-            try
+            if (Voice.Speaking) { Voice.Stop(); return; }
+            if (sentenceOnly || IsConsole(Native.GetForegroundWindow())) { Voice.Say(sentence); return; }
+
+            IDataObject saved = null;
+            try { saved = CopyOf(Clipboard.GetDataObject()); } catch (Exception) { }
+            uint before = Native.GetClipboardSequenceNumber();
+            watcher.SendCopy();
+            int tries = 0;
+            var wait = new System.Windows.Forms.Timer { Interval = 60 };
+            wait.Tick += delegate
             {
-                if (voice == null)
+                bool changed = Native.GetClipboardSequenceNumber() != before;
+                if (!changed && ++tries < 8) return;
+                wait.Stop();
+                wait.Dispose();
+                string selected = null;
+                if (changed)
                 {
-                    voice = new SpeechSynthesizer();
-                    // An Irish or British voice if one is installed.
-                    foreach (string culture in new[] { "en-IE", "en-GB" })
-                    {
-                        bool found = false;
-                        foreach (InstalledVoice v in voice.GetInstalledVoices())
-                            if (v.Enabled && v.VoiceInfo.Culture.Name == culture) { voice.SelectVoice(v.VoiceInfo.Name); found = true; break; }
-                        if (found) break;
-                    }
-                    voice.Rate = Prefs.GetText("VoiceSpeed", "Slow") == "Slow" ? -3 : 0;
+                    try { selected = Clipboard.GetText(); } catch (Exception) { }
+                    try { if (saved != null) Clipboard.SetDataObject(saved, true); else Clipboard.Clear(); } catch (Exception) { }
                 }
-                voice.SpeakAsyncCancelAll();
-                voice.SpeakAsync(word);
-            }
-            catch (Exception) { } // no voice installed
+                string text = !string.IsNullOrEmpty(selected) && selected.Trim().Length > 0 ? selected : sentence;
+                Voice.Say(text);
+            };
+            wait.Start();
+        }
+
+        static IDataObject CopyOf(IDataObject data)
+        {
+            if (data == null) return null;
+            var copy = new DataObject();
+            foreach (string f in data.GetFormats(false))
+                try { object v = data.GetData(f, false); if (v != null) copy.SetData(f, v); } catch (Exception) { }
+            return copy;
+        }
+
+        // Ctrl+C stops programs in a command window, so there only the sentence is read.
+        static bool IsConsole(IntPtr hwnd)
+        {
+            var cls = new StringBuilder(64);
+            Native.GetClassName(hwnd, cls, cls.Capacity);
+            string c = cls.ToString();
+            return c == "ConsoleWindowClass" || c == "CASCADIA_HOSTING_WINDOW_CLASS" || c == "PseudoConsoleWindow";
         }
 
         // ---- updates -------------------------------------------------------------
@@ -321,6 +433,10 @@ namespace SoundSpell
                 "    Point at a word, or press Ctrl+Shift+number, to hear it\n" +
                 "    Enter after @@word only fixes it; press Enter again to send\n\n" +
                 "Words that sound alike (there, their, they're) show what each one means.\n" +
+                "The strip above your typing shows the sentence: green is right, red needs a look.\n" +
+                "    Click a red word to fix it, or tap Shift twice for the nearest one\n" +
+                "Tap Ctrl twice to hear the selected text, or the sentence you are typing.\n" +
+                "Mistakes you fix the same way 3 times get fixed by themselves after that.\n" +
                 "SoundSpell learns: what you pick comes first next time.\n\n" +
                 "Put names and your own words in \"My words\" so they are found first.\n" +
                 "SoundSpell sits with the hidden icons by the clock (the ^ arrow).",
@@ -332,7 +448,7 @@ namespace SoundSpell
             watcher.Stop();
             updateTimer.Dispose();
             if (myWordsWatcher != null) myWordsWatcher.Dispose();
-            if (voice != null) voice.Dispose();
+            Voice.Stop();
             tray.Visible = false;
             tray.Dispose();
             base.ExitThreadCore();
@@ -497,6 +613,52 @@ namespace SoundSpell
         [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+        [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
+        [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
+
+        // ---- frosted glass (Windows 10 and 11) ------------------------------------
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct AccentPolicy { public int AccentState, AccentFlags, GradientColor, AnimationId; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct CompositionData { public int Attribute; public IntPtr Data; public int SizeOfData; }
+
+        [DllImport("user32.dll")] static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionData data);
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+        // Blurs what is behind the window and tints it with `tint` at `opacity`.
+        // Returns false where Windows cannot do it (then the window stays solid).
+        public static bool MakeFrosted(IntPtr hwnd, System.Drawing.Color tint, float opacity)
+        {
+            int a = (int)(opacity * 255);
+            int colour = (a << 24) | (tint.B << 16) | (tint.G << 8) | tint.R; // AABBGGRR
+            try
+            {
+                foreach (int state in new[] { 4, 3 }) // acrylic, then plain blur
+                {
+                    var accent = new AccentPolicy { AccentState = state, AccentFlags = 2, GradientColor = colour };
+                    int size = Marshal.SizeOf(accent);
+                    IntPtr mem = Marshal.AllocHGlobal(size);
+                    try
+                    {
+                        Marshal.StructureToPtr(accent, mem, false);
+                        var data = new CompositionData { Attribute = 19, Data = mem, SizeOfData = size }; // WCA_ACCENT_POLICY
+                        if (SetWindowCompositionAttribute(hwnd, ref data) != 0)
+                        {
+                            int round = 2; // DWMWCP_ROUND, Windows 11 only
+                            try { DwmSetWindowAttribute(hwnd, 33, ref round, 4); } catch (Exception) { }
+                            return true;
+                        }
+                    }
+                    finally { Marshal.FreeHGlobal(mem); }
+                }
+            }
+            catch (EntryPointNotFoundException) { }
+            catch (DllNotFoundException) { }
+            return false;
+        }
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
     }
 }
