@@ -93,8 +93,7 @@ $results = @(
     # Irish and British spelling.
     (Check 'my @@favrit ' "my favourite "),
     (Check 'hi @@neev ' "hi Niamh "),
-    # Learning: pick the 2nd match twice, then it comes first by itself.
-    (Check '@@gril ^2' "girl "),
+    # Learning: pick the 2nd match once, and next time it comes first by itself.
     (Check '@@gril ^2' "girl "),
     (Check '@@gril ' "girl ")
 )
