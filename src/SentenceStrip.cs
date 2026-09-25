@@ -81,7 +81,7 @@ namespace SoundSpell
         void ApplyGlass()
         {
             int opacity = Prefs.GetNumber("GlassOpacity", 35);
-            bool blur = Prefs.Get("GlassBlur", true) && WindowsTransparencyOn && !BestPerformance;
+            bool blur = Prefs.Get("GlassBlur", false) && WindowsTransparencyOn && !BestPerformance;
             string key = opacity + "/" + blur + "/" + Theme.Back.ToArgb();
             if (key == glassFor) return;
             glassFor = key;
@@ -119,10 +119,10 @@ namespace SoundSpell
         // What the strip looks like with the current settings, for the settings window.
         public static string GlassDescription()
         {
-            if (!Prefs.Get("GlassBlur", true)) return "See-through, no blur (frosted is switched off).";
+            if (!Prefs.Get("GlassBlur", false)) return "See-through: the slider sets how much shows through.";
             if (!WindowsTransparencyOn) return "See-through, no blur: Windows' Transparency effects are off (Settings, Accessibility, Visual effects).";
             if (BestPerformance) return "See-through, no blur: Windows is set to 'Adjust for best performance' (Performance Options).";
-            return "Frosted: what is behind is blurred and tinted.";
+            return "Frosted blur asked of Windows. If the strip looks solid, untick it.";
         }
 
         // The window handle, safe to read from any thread (for telling clicks apart).

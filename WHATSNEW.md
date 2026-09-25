@@ -4,7 +4,8 @@ Each version's notes show in the update window. Newest first. Write them for her
 in plain words, one line each.
 
 ## 3.2.0
-- The glass slider now works on every computer. If Windows can't blur (for example when it's set to "Adjust for best performance"), the strip is see-through without the blur instead of solid.
+- The glass slider now really works: the strip is see-through by the amount you choose. (Before, it could look solid whatever the slider said.)
+- The frosted blur is now an extra you can try in Settings. On some computers Windows draws it solid, so it is off to start with.
 - Settings tells you which kind of glass the strip is using right now.
 - Password boxes are spotted more reliably in apps that are hard to read, and SoundSpell stays off until you really leave the password box.
 

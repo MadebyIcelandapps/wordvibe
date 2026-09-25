@@ -44,7 +44,7 @@ namespace SoundSpell
                 delegate (string v) { Prefs.SetText("StripShow", v); });
             Slider("    Glass opacity:", 10, 90, Prefs.GetNumber("GlassOpacity", 35), "%",
                 delegate (int v) { Prefs.SetNumber("GlassOpacity", v); });
-            Check("    Frosted (blur what is behind it)", Prefs.Get("GlassBlur", true),
+            Check("    Try frosted blur (on some PCs this makes the strip solid)", Prefs.Get("GlassBlur", false),
                 delegate (bool v) { Prefs.Set("GlassBlur", v); if (glassNowLabel != null) glassNowLabel.Text = "Now: " + SentenceStrip.GlassDescription(); });
             var glassNow = new Label { Text = "Now: " + SentenceStrip.GlassDescription(), MaximumSize = new Size(ClientSize.Width - 60, 0), AutoSize = true, ForeColor = SystemColors.GrayText, Font = new Font("Verdana", 9f) };
             glassNow.Location = new Point(40, y - 4);
