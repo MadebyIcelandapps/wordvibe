@@ -13,7 +13,7 @@ namespace SoundSpell
 {
     static class Updater
     {
-        public const string Version = "3.0.0";
+        public const string Version = "3.1.0";
         const string VersionUrl = "https://raw.githubusercontent.com/MadebyIcelandapps/wordvibe/main/VERSION";
 
         // The newest version on GitHub, or null if it could not be reached.
@@ -29,6 +29,47 @@ namespace SoundSpell
                 }
             }
             catch (Exception) { return null; }
+        }
+
+        const string NotesUrl = "https://raw.githubusercontent.com/MadebyIcelandapps/wordvibe/main/WHATSNEW.md";
+
+        // The WHATSNEW.md text on GitHub, or null.
+        public static string Notes()
+        {
+            try
+            {
+                ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+                using (var wc = new WebClient())
+                {
+                    wc.Headers["User-Agent"] = "SoundSpell/" + Version;
+                    wc.Encoding = System.Text.Encoding.UTF8;
+                    return wc.DownloadString(NotesUrl);
+                }
+            }
+            catch (Exception) { return null; }
+        }
+
+        // The notes of every version newer than this one, newest first: the lines
+        // under each "## x.y.z" heading, without the "- ".
+        public static System.Collections.Generic.List<string> NotesSince(string notes, string have)
+        {
+            var lines = new System.Collections.Generic.List<string>();
+            if (notes == null) return lines;
+            System.Version mine;
+            System.Version.TryParse(have, out mine);
+            bool take = false;
+            foreach (string raw in notes.Split('\n'))
+            {
+                string line = raw.Trim();
+                if (line.StartsWith("## "))
+                {
+                    System.Version v;
+                    take = System.Version.TryParse(line.Substring(3).Trim(), out v) && (mine == null || v > mine);
+                    continue;
+                }
+                if (take && line.StartsWith("- ")) lines.Add(line.Substring(2));
+            }
+            return lines;
         }
 
         public static bool IsNewer(string latest)

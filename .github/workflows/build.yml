@@ -18,12 +18,27 @@ jobs:
           $file = (Get-Content VERSION -Raw).Trim()
           $code = (Select-String 'public const string Version = "(.*)"' src/Updater.cs).Matches[0].Groups[1].Value
           if ($file -ne $code) { throw "VERSION says $file but src/Updater.cs says $code" }
+          if (-not (Select-String -Path WHATSNEW.md -Pattern "^## $([regex]::Escape($file))$" -Quiet)) { throw "WHATSNEW.md has no notes for $file" }
       - name: Spelling checks
         run: ./test/run.ps1
       - name: Build SoundSpell.exe
         run: ./build.ps1
       - name: Try it in Notepad
         run: ./test/e2e.ps1
+      - name: Update window shows what is new
+        run: |
+          $env:SOUNDSPELL_LOG = Join-Path $env:TEMP 'update-window.log'
+          $p = Start-Process ./SoundSpell.exe -ArgumentList '--update-window-test', "`"$PWD\WHATSNEW.md`"" -PassThru
+          Start-Sleep 2
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          $area = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $area.Width, $area.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen(0, 0, 0, 0, $bmp.Size)
+          $bmp.Save("$PWD\update-window.png")
+          $p.WaitForExit()
+          Get-Content $env:SOUNDSPELL_LOG
+          if ($p.ExitCode -ne 0) { throw "update window test failed ($($p.ExitCode))" }
+          if (-not (Select-String -Path $env:SOUNDSPELL_LOG -Pattern 'update window shown: [1-9]' -Quiet)) { throw 'update window did not show its notes' }
       - name: Natural voice downloads and speaks
         run: |
           # Every voice in the list can be downloaded.
@@ -53,7 +68,7 @@ jobs:
       - name: Package
         run: |
           New-Item -ItemType Directory pkg | Out-Null
-          Copy-Item SoundSpell.exe, Install.cmd, install.ps1, uninstall.ps1, update.ps1, build.ps1, VERSION, words.txt, irish.txt, homophones.txt, README.md pkg
+          Copy-Item SoundSpell.exe, Install.cmd, install.ps1, uninstall.ps1, update.ps1, build.ps1, VERSION, WHATSNEW.md, words.txt, irish.txt, homophones.txt, README.md pkg
           Copy-Item src pkg -Recurse
       - uses: actions/upload-artifact@v4
         with:
@@ -63,5 +78,7 @@ jobs:
         if: always()
         with:
           name: screenshots
-          path: strip.png
+          path: |
+            strip.png
+            update-window.png
           if-no-files-found: ignore

@@ -28,6 +28,20 @@ namespace SoundSpell
         {
             // For the automatic checks: SoundSpell.exe --voice-test <voice id> <out.wav> <text>
             if (args.Length == 4 && args[0] == "--voice-test") return Voice.SelfTest(args[1], args[3], args[2]);
+            // For the automatic checks: SoundSpell.exe --update-window-test <WHATSNEW.md>
+            // shows the update window as if 99.0.0 were out, for a few seconds.
+            if (args.Length == 2 && args[0] == "--update-window-test")
+            {
+                Application.EnableVisualStyles();
+                var notes = Updater.NotesSince(File.ReadAllText(args[1]), "3.0.0");
+                var form = new UpdateForm("99.0.0", notes);
+                form.Shown += delegate { Log.Write("update window shown: " + notes.Count + " notes, " + form.Bounds); };
+                var close = new System.Windows.Forms.Timer { Interval = 4000 };
+                close.Tick += delegate { form.Close(); };
+                close.Start();
+                Application.Run(form);
+                return notes.Count > 0 ? 0 : 5;
+            }
 
             bool first;
             using (var only = new Mutex(true, @"Local\SoundSpell.Tray", out first))
@@ -57,7 +71,7 @@ namespace SoundSpell
         ToolStripMenuItem enabledItem;
         FileSystemWatcher myWordsWatcher;
         readonly Dictionary<string, string> autoFixes = new Dictionary<string, string>(StringComparer.Ordinal);
-        string updateReady;
+        UpdateForm updateForm;
 
         public bool SayFixed, HearOnPoint;
 
@@ -72,7 +86,6 @@ namespace SoundSpell
             tray.Text = "SoundSpell";
             tray.ContextMenuStrip = BuildMenu();
             tray.DoubleClick += delegate { ShowTry(); };
-            tray.BalloonTipClicked += delegate { if (updateReady != null) OfferUpdate(updateReady); };
             tray.Visible = true;
 
             watcher = new KeyWatcher(this);
@@ -88,7 +101,7 @@ namespace SoundSpell
             updateTimer.Interval = 60 * 1000;
             updateTimer.Tick += delegate
             {
-                updateTimer.Interval = 24 * 60 * 60 * 1000;
+                updateTimer.Interval = 6 * 60 * 60 * 1000; // then every 6 hours
                 if (Prefs.Get("AutoUpdate", true)) CheckForUpdates(false);
             };
             updateTimer.Start();
@@ -353,18 +366,20 @@ namespace SoundSpell
 
         // ---- updates -------------------------------------------------------------
 
+        // Looks for a newer version on GitHub. When there is one, the update window
+        // comes up (unless she skipped that version or said "Later" today, and did
+        // not ask herself).
         public void CheckForUpdates(bool asked)
         {
             var t = new Thread(delegate ()
             {
                 string latest = Updater.Latest();
+                string notes = Updater.IsNewer(latest) ? Updater.Notes() : null;
                 Post(delegate
                 {
                     if (Updater.IsNewer(latest))
                     {
-                        updateReady = latest;
-                        if (asked) OfferUpdate(latest);
-                        else tray.ShowBalloonTip(15000, "A new SoundSpell is ready", "Click here to update to version " + latest + ".", ToolTipIcon.Info);
+                        if (asked || UpdateForm.ShouldOffer(latest)) ShowUpdate(latest, Updater.NotesSince(notes, Updater.Version));
                     }
                     else if (asked)
                         MessageBox.Show(latest == null ? "Could not reach GitHub to check. Is the internet on?" :
@@ -375,12 +390,11 @@ namespace SoundSpell
             t.Start();
         }
 
-        void OfferUpdate(string latest)
+        void ShowUpdate(string latest, List<string> notes)
         {
-            if (MessageBox.Show("Update SoundSpell to version " + latest + " now?\n\nIt takes a few seconds and keeps your settings and words.",
-                    "SoundSpell", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            if (!Updater.Install())
-                MessageBox.Show("The updater is missing. Download SoundSpell again and run Install.cmd.", "SoundSpell");
+            if (updateForm != null && !updateForm.IsDisposed) updateForm.Close();
+            updateForm = new UpdateForm(latest, notes);
+            updateForm.Show();
         }
 
         // ---- menu and windows ----------------------------------------------------

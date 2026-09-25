@@ -72,7 +72,7 @@ It is running now and starts with Windows from now on. It builds itself with the
 
 If Windows shows *"Windows protected your PC"*, choose **More info → Run anyway**. The installer is not signed, because signing needs a paid code-signing certificate.
 
-**Updating:** use **Check for updates** in the tray menu. It downloads the newest version from this repository and installs it over the old one. Settings, *My words* and what it has learned are kept.
+**Updating:** when a new version is out, a small window pops up in the corner with what's new and an **Update now** button (it never takes the focus from what you are typing). **Later** asks again tomorrow; **Skip this version** waits for the next one. **Check for updates** in the tray menu looks straight away. It downloads the newest version from this repository and installs it over the old one. Settings, *My words* and what it has learned are kept.
 
 **Uninstalling:** Settings → Apps → SoundSpell → Uninstall. *My words* and what it has learned stay in `%APPDATA%\SoundSpell`.
 
@@ -111,6 +111,7 @@ Some words don't sound like their spelling (`Wednesday`, `receipt`, `Siobhán`, 
 - `homophones.txt`: words that sound alike
 - `build.ps1`, `install.ps1`, `update.ps1`, `uninstall.ps1`, `Install.cmd`: build, install, update and remove
 - `VERSION`: the version number, which the updater compares
+- `WHATSNEW.md`: what changed in each version, shown in the update window (the build fails if the new version has no notes)
 - `test/`: spelling checks (`test/run.sh` with Mono on Linux/macOS, `test/run.ps1` on Windows) and `test/e2e.ps1`, which types into Notepad on Windows to check the whole thing works
 
 Set the environment variable `SOUNDSPELL_LOG` to a file path to get a trace of what it sees and types.
