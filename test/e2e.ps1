@@ -54,6 +54,7 @@ function Type-Slowly([string]$keys) {
 }
 
 function Check([string]$typed, [string]$want) {
+    $logStart = if (Test-Path $env:SOUNDSPELL_LOG) { (Get-Content $env:SOUNDSPELL_LOG).Count } else { 0 }
     $np = Start-Process notepad -PassThru
     Start-Sleep -Seconds 2
     $null = $shell.AppActivate($np.Id)
@@ -67,6 +68,8 @@ function Check([string]$typed, [string]$want) {
     Stop-Process $np.Id -Force
     if (($want -split '\|') -ccontains $got) { Write-Host "ok   $typed"; $script:summary += "ok   $typed"; return $true }
     $line = "FAIL $typed   want [$want]   got [$got]"
+    Write-Host "--- trace for: $typed"
+    Get-Content $env:SOUNDSPELL_LOG | Select-Object -Skip $logStart | ForEach-Object { Write-Host "    $_" }
     Write-Host $line; $script:summary += $line
     return $false
 }
