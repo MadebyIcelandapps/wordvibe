@@ -1,6 +1,6 @@
 # SoundSpell
 
-A small Windows helper for people who spell words the way they sound, made with dyslexia in mind. It uses British and Irish spelling and knows Irish names and places.
+A small Windows helper for people who spell words the way they sound, made with dyslexia in mind. US and UK spellings both count as right, and it knows Irish names and places.
 
 ## How to use it
 
@@ -24,6 +24,17 @@ A list of matches pops up next to the text:
 
 The list closes as soon as you keep typing, click somewhere else, or switch window.
 
+**The sentence strip.** While you type, a frosted-glass strip sits just above your words and shows the sentence so far:
+
+- a soft **green** behind words that are spelled right
+- a soft **red** behind words to check
+
+Click a red word to see its matches, or tap Shift twice to fix the nearest red one. The 🔊 button reads the sentence out. Names it doesn't know (a capital in the middle of a sentence) stay plain, and any unknown word can be added to *My words* from its list.
+
+**Reading out loud.** Select any text (an email, a web page, a school handout) and **tap Ctrl twice** to hear it. With nothing selected, it reads the sentence you are typing. Tap Ctrl twice again to stop. In Settings you can pick a **natural voice**. It downloads once (about 60 MB) and runs on the computer itself, so nothing you read is sent anywhere. The British voices are Cori, Jenny, Alba, Alan and a northern English man, and there are two American ones. There isn't an Irish-accent one yet. Until a natural voice is chosen, or if it ever fails, the built-in Windows voice is used.
+
+**Your usual mistakes get fixed by themselves.** Once you have fixed the same misspelling the same way 3 times, it gets fixed as you type from then on, with no shortcut needed. A little note says so, and Ctrl+0 right after puts your spelling back and stops it. Settings has a button to see or change the list.
+
 **Words that sound alike** (there / their / they're, your / you're, weather / whether, and about 70 more) all show up together, each with a short meaning. The word before helps put the right one first: `lost @@there` gives *their*.
 
 **It learns.** A word you pick from the list comes first the next time you spell it that way. If you pick Ctrl+0 twice for your own spelling, your spelling comes first.
@@ -34,7 +45,9 @@ Right-click the SoundSpell icon by the clock (under the **^** arrow) and choose 
 
 - **Shortcut:** Tap Shift twice, Ctrl+Space, Tap right Ctrl, or None (then use `@@` only)
 - **Put in the first match by itself**, or only show the list
-- **Read the fixed word out loud**, **read a match when I point at it**, voice speed. An Irish or British voice is used if Windows has one. You can add more voices under Settings → Time & language → Speech.
+- **Show the sentence above what I type** (the strip) and **fix my usual mistakes by themselves**
+- **Voice:** the Windows voice, or a natural voice (downloads once), with a sample button, plus voice speed
+- **Read the fixed word out loud**, **read a match when I point at it**, and **tap Ctrl twice to hear the selected text**
 - **Text size**, **colours** (cream, pale yellow, light blue, white, dark) and **font** (Verdana, OpenDyslexic if installed, Comic Sans MS, Tahoma, Arial), with a preview
 - **Start when I sign in**
 - **Also work in programs running as administrator.** Windows blocks normal programs from typing into admin programs. Turning this on asks Windows once, then starts SoundSpell as administrator at sign-in.
@@ -65,7 +78,7 @@ If Windows shows *"Windows protected your PC"*, choose **More info → Run anywa
 
 ## How it finds the word
 
-Every dictionary word (50,000 common words in British/Irish spelling, plus Irish names and places) gets a "sound key":
+Every dictionary word (55,000 common words in both US and UK spelling, plus Irish names and places) gets a "sound key":
 
 - `ph` and `f` sound the same, and so do `c`, `k` and `q`
 - `tion` sounds like `shun`, and `-re` sounds like `-er` (centre)
@@ -86,6 +99,9 @@ Some words don't sound like their spelling (`Wednesday`, `receipt`, `Siobhán`, 
 - `src/Homophones.cs`: words that sound alike, with meanings
 - `src/KeyWatcher.cs`: watches typing, the shortcut, and swaps the word
 - `src/Popup.cs`: the list of matches
+- `src/SentenceStrip.cs`: the frosted-glass sentence strip
+- `src/Caret.cs`: finds where the text cursor is (also in browsers)
+- `src/Voice.cs`: natural voices (Piper) and the Windows voice
 - `src/SettingsForm.cs`, `src/Prefs.cs`: the settings window and the settings themselves
 - `src/AdminMode.cs`: admin mode
 - `src/Updater.cs`: updates

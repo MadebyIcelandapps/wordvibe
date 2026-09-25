@@ -65,7 +65,7 @@ function Check([string]$typed, [string]$want) {
     Start-Sleep -Milliseconds 300
     $got = (Get-Clipboard -Raw) -replace "`r`n", "`n"
     Stop-Process $np.Id -Force
-    if ($got -ceq $want) { Write-Host "ok   $typed"; $script:summary += "ok   $typed"; return $true }
+    if (($want -split '\|') -ccontains $got) { Write-Host "ok   $typed"; $script:summary += "ok   $typed"; return $true }
     $line = "FAIL $typed   want [$want]   got [$got]"
     Write-Host $line; $script:summary += $line
     return $false
@@ -145,8 +145,8 @@ $results = @(
     # Words that sound alike: the word before decides.
     (Check 'the @@wether ' "the weather "),
     (Check 'lost @@there bags' "lost their bags"),
-    # Irish and British spelling.
-    (Check 'my @@favrit ' "my favourite "),
+    # US and UK spellings both count; Irish names are known.
+    (Check 'my @@favrit ' "my favourite |my favorite "),
     (Check 'hi @@neev ' "hi Niamh "),
     # The strip: the last word is fine, so Shift twice fixes the red word before it.
     (Check 'I like wensday bananas{SHIFT2}' "I like Wednesday bananas"),
