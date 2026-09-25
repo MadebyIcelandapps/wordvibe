@@ -27,8 +27,8 @@ namespace SoundSpell
 
     sealed class SentenceStrip : Form
     {
-        const float GlassOpacity = 0.35f;
         readonly Timer idle = new Timer();
+        string glassFor;       // the settings the glass was made with
         List<StripWord> words = new List<StripWord>();
         Rectangle speaker;
         bool glass;
@@ -43,7 +43,7 @@ namespace SoundSpell
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             DoubleBuffered = true;
-            idle.Interval = 8000;
+            idle.Interval = 6000;
             idle.Tick += delegate { HideNow(); };
         }
 
@@ -65,11 +65,20 @@ namespace SoundSpell
             base.WndProc(ref m);
         }
 
-        protected override void OnHandleCreated(EventArgs e)
+        // Frosted glass: what is behind is blurred and tinted at the chosen opacity
+        // (35% by default). Re-made when the settings change.
+        void ApplyGlass()
         {
-            base.OnHandleCreated(e);
-            glass = Native.MakeFrosted(Handle, Theme.Back, GlassOpacity);
+            int opacity = Prefs.GetNumber("GlassOpacity", 35);
+            bool blur = Prefs.Get("GlassBlur", true);
+            string key = opacity + "/" + blur + "/" + Theme.Back.ToArgb();
+            if (key == glassFor) return;
+            glassFor = key;
+            glass = Native.MakeFrosted(Handle, Theme.Back, opacity / 100f, blur);
         }
+
+        // The window handle, safe to read from any thread (for telling clicks apart).
+        public volatile IntPtr Hwnd;
 
         public bool Showing { get { return IsHandleCreated && Native.IsWindowVisible(Handle); } }
         public Rectangle ScreenBounds { get { return Showing ? Bounds : Rectangle.Empty; } }
@@ -77,29 +86,64 @@ namespace SoundSpell
         public void HideNow()
         {
             idle.Stop();
-            if (IsHandleCreated) Native.ShowWindow(Handle, 0);
+            if (IsHandleCreated && Native.IsWindowVisible(Handle))
+            {
+                Native.ShowWindow(Handle, 0);
+                if (Log.On) Log.Write("strip hidden");
+            }
         }
+
+        // Hide in `ms`, unless shown again before then.
+        public void HideAfter(int ms)
+        {
+            if (!Showing) return;
+            idle.Stop();
+            idle.Interval = ms;
+            idle.Start();
+        }
+
+        // Sizes: small by default, so it stays out of the way.
+        public static readonly string[] Sizes = { "Small", "Medium", "Large" };
+        public static readonly string[] Places = { "Just above my typing", "Just below my typing", "Bottom of the screen" };
+        public static readonly string[] Shows = { "Always while I type", "Only when a word needs a look" };
 
         // Shows `list` just above `caret` (screen coordinates).
         public void ShowWords(List<StripWord> list, Rectangle caret, bool exact)
         {
             words = list;
+            string size = Prefs.GetText("StripSize", Sizes[0]);
+            float pt = size == "Large" ? 13f : size == "Medium" ? 11f : 9f;
             if (font != null) font.Dispose();
-            font = new Font(Theme.FontName, Math.Max(11f, Theme.Size * 0.85f));
+            font = new Font(Theme.FontName, pt);
             if (!IsHandleCreated) CreateHandle();
+            Hwnd = Handle;
+            ApplyGlass();
 
             Rectangle screen = Screen.FromPoint(caret.Location).WorkingArea;
-            int maxW = Math.Min(900, screen.Width - 40);
+            int maxW = Math.Min(size == "Large" ? 800 : size == "Medium" ? 640 : 520, screen.Width - 40);
             int h, w;
             using (var g = CreateGraphics())
             {
-                h = (int)Math.Ceiling(g.MeasureString("Ag", font).Height) + 16;
+                h = (int)Math.Ceiling(g.MeasureString("Ag", font).Height) + 8;
                 w = LayoutWords(g, maxW, h);
             }
-            // Just above the line being typed, starting a little left of the words.
-            int x = exact ? caret.Left - w + 40 : caret.Left + 8;
-            int y = exact ? caret.Top - h - 6 : caret.Top - h - 4;
-            if (y < screen.Top) y = caret.Bottom + 6;
+            string place = Prefs.GetText("StripPlace", Places[0]);
+            int x, y;
+            if (place == Places[2])
+            {
+                // Out of the way, centred at the bottom of the screen.
+                x = screen.Left + (screen.Width - w) / 2;
+                y = screen.Bottom - h - 12;
+            }
+            else
+            {
+                // Ends just past the cursor, so it sits over the words just typed.
+                x = exact ? caret.Left - w + 24 : caret.Left + 8;
+                bool below = place == Places[1];
+                y = below ? caret.Bottom + 4 : caret.Top - h - 4;
+                if (!below && y < screen.Top) y = caret.Bottom + 4;
+                if (below && y + h > screen.Bottom) y = caret.Top - h - 4;
+            }
             x = Math.Max(screen.Left + 4, Math.Min(x, screen.Right - w - 4));
             Native.SetWindowPos(Handle, new IntPtr(-1), x, y, w, h, 0x0010 | 0x0040); // TOPMOST, NOACTIVATE | SHOWWINDOW
             if (Log.On)
@@ -111,13 +155,14 @@ namespace SoundSpell
             Invalidate();
             Update();
             idle.Stop();
+            idle.Interval = 6000;
             idle.Start();
         }
 
         // Places the words from the right (newest) end, dropping old ones that do not fit.
         int LayoutWords(Graphics g, int maxW, int h)
         {
-            int pad = 6, gap = 6, left = 10 + h; // room for the speaker button
+            int pad = 4, gap = 3, left = 6 + h; // room for the speaker button
             int total = left;
             var widths = new int[words.Count];
             for (int i = 0; i < words.Count; i++) widths[i] = (int)g.MeasureString(words[i].Text, font).Width + 2 * pad;
@@ -127,11 +172,11 @@ namespace SoundSpell
             for (int i = 0; i < words.Count; i++)
             {
                 if (i < first) { words[i].Box = Rectangle.Empty; continue; }
-                words[i].Box = new Rectangle(x, 5, widths[i], h - 10);
+                words[i].Box = new Rectangle(x, 3, widths[i], h - 6);
                 x += widths[i] + gap;
             }
-            speaker = new Rectangle(6, 5, h - 10, h - 10);
-            return Math.Max(x + 4, 160);
+            speaker = new Rectangle(3, 3, h - 6, h - 6);
+            return Math.Max(x + 2, 60);
         }
 
         protected override void OnPaintBackground(PaintEventArgs e) { }
@@ -142,7 +187,7 @@ namespace SoundSpell
             g.SmoothingMode = SmoothingMode.AntiAlias;
             // Grayscale anti-aliasing keeps the text solid on the see-through glass.
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            // On glass, see-through pixels show the blur, tinted by Windows at 35%.
+            // On glass, see-through pixels show the blur, tinted by Windows.
             if (glass) g.Clear(Color.Transparent);
             else g.Clear(Theme.Back);
             using (var border = new Pen(Color.FromArgb(90, Theme.Border)))

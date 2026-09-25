@@ -33,8 +33,19 @@ namespace SoundSpell
             Note("Type a word the way it sounds, then use the shortcut. @@word works too.");
             Check("Put in the first match by itself (off: only show the list)", Prefs.Get("AutoReplace", true),
                 delegate (bool v) { Prefs.Set("AutoReplace", v); app.Apply(); });
-            Check("Show the sentence above what I type (green: right, red: check it)", Prefs.Get("Strip", true),
+            Check("Show the sentence strip while I type (green: right, red: check it)", Prefs.Get("Strip", true),
                 delegate (bool v) { Prefs.Set("Strip", v); app.Apply(); });
+            Choice("    Strip size:", SentenceStrip.Sizes, Prefs.GetText("StripSize", SentenceStrip.Sizes[0]),
+                delegate (string v) { Prefs.SetText("StripSize", v); });
+            Choice("    Where:", SentenceStrip.Places, Prefs.GetText("StripPlace", SentenceStrip.Places[0]),
+                delegate (string v) { Prefs.SetText("StripPlace", v); });
+            Choice("    Show it:", SentenceStrip.Shows, Prefs.GetText("StripShow", SentenceStrip.Shows[0]),
+                delegate (string v) { Prefs.SetText("StripShow", v); });
+            Slider("    Glass opacity:", 10, 90, Prefs.GetNumber("GlassOpacity", 35), "%",
+                delegate (int v) { Prefs.SetNumber("GlassOpacity", v); });
+            Check("    Frosted (blur what is behind it)", Prefs.Get("GlassBlur", true),
+                delegate (bool v) { Prefs.Set("GlassBlur", v); });
+            Note("If it is never see-through: Windows Settings, Personalisation, Colours, Transparency effects.");
             Check("Fix my usual mistakes by themselves", Prefs.Get("AutoFix", true),
                 delegate (bool v) { Prefs.Set("AutoFix", v); app.Apply(); });
             Note("A mistake you fix the same way 3 times gets fixed as you type after that.");
@@ -209,6 +220,21 @@ namespace SoundSpell
             Controls.Add(c);
             y += 30;
             return c;
+        }
+
+        void Slider(string label, int min, int max, int value, string unit, Action<int> changed)
+        {
+            var l = new Label { Text = label, AutoSize = true };
+            l.Location = new Point(20, y + 6);
+            Controls.Add(l);
+            var shown = new Label { AutoSize = true, Text = value + unit };
+            var bar = new TrackBar { Minimum = min, Maximum = max, TickFrequency = 10, SmallChange = 5, LargeChange = 10, Width = 160, Value = Math.Max(min, Math.Min(max, value)) };
+            bar.Location = new Point(ClientSize.Width - 20 - 200 - 4, y);
+            shown.Location = new Point(ClientSize.Width - 20 - 36, y + 6);
+            bar.ValueChanged += delegate { shown.Text = bar.Value + unit; if (!loading) changed(bar.Value); };
+            Controls.Add(bar);
+            Controls.Add(shown);
+            y += 44;
         }
 
         ComboBox Choice(string label, string[] options, string value, Action<string> changed)

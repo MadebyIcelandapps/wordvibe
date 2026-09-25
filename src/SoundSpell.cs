@@ -33,6 +33,10 @@ namespace SoundSpell
             using (var only = new Mutex(true, @"Local\SoundSpell.Tray", out first))
             {
                 if (!first) return 0;
+                // Real pixels everywhere: mouse clicks, the caret and our windows then
+                // agree on where things are, on scaled screens too.
+                try { if (!Native.SetProcessDpiAwarenessContext(new IntPtr(-4))) Native.SetProcessDPIAware(); }
+                catch (EntryPointNotFoundException) { Native.SetProcessDPIAware(); }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new TrayApp());
@@ -627,6 +631,10 @@ namespace SoundSpell
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int cmd);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
         [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
+        [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+        [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+        [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+        [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
 
@@ -641,15 +649,17 @@ namespace SoundSpell
         [DllImport("user32.dll")] static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionData data);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
-        // Blurs what is behind the window and tints it with `tint` at `opacity`.
-        // Returns false where Windows cannot do it (then the window stays solid).
-        public static bool MakeFrosted(IntPtr hwnd, System.Drawing.Color tint, float opacity)
+        // Tints the window with `tint` at `opacity`, and blurs what is behind it if
+        // `blur`. Plain blur, not acrylic: Windows 11 acrylic adds a milky layer that
+        // makes it far less see-through than the chosen opacity. Returns false where
+        // Windows cannot do it (then the window stays solid).
+        public static bool MakeFrosted(IntPtr hwnd, System.Drawing.Color tint, float opacity, bool blur)
         {
-            int a = (int)(opacity * 255);
+            int a = Math.Max(0, Math.Min(255, (int)(opacity * 255)));
             int colour = (a << 24) | (tint.B << 16) | (tint.G << 8) | tint.R; // AABBGGRR
             try
             {
-                foreach (int state in new[] { 4, 3 }) // acrylic, then plain blur
+                foreach (int state in blur ? new[] { 3, 4 } : new[] { 2 }) // blur (acrylic if not), or tint only
                 {
                     var accent = new AccentPolicy { AccentState = state, AccentFlags = 2, GradientColor = colour };
                     int size = Marshal.SizeOf(accent);

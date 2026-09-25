@@ -34,6 +34,9 @@ public static class Kbd {
     if (shift) Key(0x10, true); if (ctrl) Key(0x11, true);
   }
   public static void Tap(int vk) { Key(vk, false); Key(vk, true); }
+  [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] static extern void mouse_event(uint flags, int x, int y, uint data, IntPtr extra);
+  public static void Click(int x, int y) { SetCursorPos(x, y); Thread.Sleep(150); mouse_event(2, 0, 0, 0, IntPtr.Zero); Thread.Sleep(40); mouse_event(4, 0, 0, 0, IntPtr.Zero); }
   public static void Char(char c) { short r = VkKeyScan(c); Press(r & 0xFF, (r & 0x100) != 0, false); }
 }
 '@
@@ -101,7 +104,17 @@ function StripCheck {
         $avg = [int]($sum / $n)
         $info = "strip ${w}x${h} glass=$glass red=$red green=$green brightness=$avg words: $words"
         Write-Host $info
-        $ok = ($words -match 'nesesary=Bad') -and ($words -match 'went=Good') -and $red -gt 5 -and $green -gt 5 -and $avg -gt 90
+        $ok = ($words -match 'nesesary=Bad') -and ($words -match 'went=Good') -and $red -gt 5 -and $green -gt 5 -and $avg -gt 90 -and $h -le 32
+
+        # Click the speaker: it reads the sentence and the strip stays up.
+        $before = (Get-Content $env:SOUNDSPELL_LOG).Count
+        [Kbd]::Click($x + [int]($h / 2), $y + [int]($h / 2))
+        Start-Sleep -Milliseconds 900
+        $after = Get-Content $env:SOUNDSPELL_LOG | Select-Object -Skip $before
+        $spoke = [bool]($after | Where-Object { $_ -match 'speak: we went to nesesary lengths' })
+        $hid = [bool]($after | Where-Object { $_ -match 'strip hidden' })
+        $info += " speaker: spoke=$spoke hidden=$hid"
+        $ok = $ok -and $spoke -and -not $hid
     }
     Stop-Process $np.Id -Force
     $line2 = if ($ok) { "ok   strip shows green and red ($info)" } else { "FAIL strip ($info) [$line]" }

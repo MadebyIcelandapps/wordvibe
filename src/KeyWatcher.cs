@@ -142,8 +142,11 @@ namespace SoundSpell
             catch (InvalidOperationException) { }
         }
 
-        // A click can move the text cursor, so whatever was being typed no longer counts
-        // (unless the click is on the popup or the strip).
+        // A click in the window being typed in can move the text cursor, so whatever
+        // was being typed no longer counts. Clicks on the list or the strip are ours.
+        // A click in some other window (a screenshot tool, say) leaves the strip up a
+        // moment longer. Which window was clicked is asked of Windows, rather than
+        // compared by position, so scaled screens cannot get it wrong.
         IntPtr MouseProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0)
@@ -152,13 +155,22 @@ namespace SoundSpell
                 if (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN)
                 {
                     var pt = (Native.POINT)Marshal.PtrToStructure(lParam, typeof(Native.POINT));
-                    bool ours = (popup != null && popup.ScreenBounds.Contains(pt.x, pt.y))
-                             || (strip != null && strip.ScreenBounds.Contains(pt.x, pt.y));
-                    if (!ours)
+                    IntPtr under = Native.GetAncestor(Native.WindowFromPoint(pt), 2); // GA_ROOT
+                    IntPtr stripH = strip != null ? strip.Hwnd : IntPtr.Zero;
+                    IntPtr popupH = popup != null ? popup.Hwnd : IntPtr.Zero;
+                    bool ours = under != IntPtr.Zero && (under == stripH || under == popupH);
+                    if (Log.On) Log.Write("click " + pt.x + "," + pt.y + (ours ? " on ours" : under == lastWindow ? " in the typing window" : " elsewhere"));
+                    if (ours) { }
+                    else if (under == lastWindow)
                     {
                         recent.Length = 0;
                         CloseAll();
                         HideStrip();
+                    }
+                    else
+                    {
+                        CloseAll();
+                        app.Post(delegate { if (strip != null) strip.HideAfter(2500); });
                     }
                 }
             }
@@ -254,6 +266,9 @@ namespace SoundSpell
         {
             if (Log.On) Log.Write("key " + vk.ToString("X2") + " ctrl=" + Down(VK_CONTROL) + " popup=" + popupUp + " choices=" + (choices != null) + " recent=[" + recent + "]");
             if (IsModifier(vk)) return false;
+            // Screenshot keys (Print Screen, Win+Shift+S) leave everything as it is,
+            // so the strip and the list can be in the picture.
+            if (vk == 0x2C || Down(VK_LWIN) || Down(VK_RWIN)) return false;
 
             IntPtr fg = Native.GetForegroundWindow();
             if (fg != lastWindow) { lastWindow = fg; recent.Length = 0; CloseAll(); HideStrip(); }
@@ -749,7 +764,10 @@ namespace SoundSpell
                             OnHook(delegate { string s = CurrentSentence(); app.Post(delegate { app.ReadAloud(s, true); }); });
                         };
                     }
-                    if (words.Count == 0) { strip.HideNow(); return; }
+                    bool onlyRed = Prefs.GetText("StripShow", SentenceStrip.Shows[0]) == SentenceStrip.Shows[1];
+                    bool anyRed = false;
+                    foreach (StripWord sw in words) if (sw.State == WordState.Bad) anyRed = true;
+                    if (words.Count == 0 || (onlyRed && !anyRed)) { strip.HideNow(); return; }
                     strip.ShowWords(words, caret, exact);
                 });
             }

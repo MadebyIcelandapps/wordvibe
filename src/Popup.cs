@@ -57,6 +57,11 @@ namespace SoundSpell
 
         public bool Showing { get { return IsHandleCreated && Native.IsWindowVisible(Handle); } }
 
+        // The window handle, safe to read from any thread (for telling clicks apart).
+        public volatile IntPtr Hwnd;
+
+        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Hwnd = Handle; }
+
         public Rectangle ScreenBounds { get { return Showing ? Bounds : Rectangle.Empty; } }
 
         public void HideNow()

@@ -44,6 +44,20 @@ namespace SoundSpell
             using (var k = Registry.CurrentUser.CreateSubKey(Key)) k.SetValue(name, value, RegistryValueKind.String);
         }
 
+        public static int GetNumber(string name, int fallback)
+        {
+            using (var k = Registry.CurrentUser.OpenSubKey(Key))
+            {
+                object v = k == null ? null : k.GetValue(name);
+                try { return v == null ? fallback : Convert.ToInt32(v); } catch (Exception) { return fallback; }
+            }
+        }
+
+        public static void SetNumber(string name, int value)
+        {
+            using (var k = Registry.CurrentUser.CreateSubKey(Key)) k.SetValue(name, value, RegistryValueKind.DWord);
+        }
+
         public static bool StartsWithWindows
         {
             get
