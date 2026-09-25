@@ -34,6 +34,9 @@ public static class Kbd {
     if (shift) Key(0x10, true); if (ctrl) Key(0x11, true);
   }
   public static void Tap(int vk) { Key(vk, false); Key(vk, true); }
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  public static string ForegroundTitle() { var sb = new System.Text.StringBuilder(256); GetWindowText(GetForegroundWindow(), sb, 256); return sb.ToString(); }
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags, int x, int y, uint data, IntPtr extra);
   public static void Click(int x, int y) { SetCursorPos(x, y); Thread.Sleep(150); mouse_event(2, 0, 0, 0, IntPtr.Zero); Thread.Sleep(40); mouse_event(4, 0, 0, 0, IntPtr.Zero); }
@@ -150,11 +153,18 @@ function PasswordCheck([string]$kind) {
     Remove-Item $out -ErrorAction SilentlyContinue
     $logStart = (Get-Content $env:SOUNDSPELL_LOG).Count
     $form = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSScriptRoot\password-form.ps1`"", $kind, "`"$out`"" -PassThru
-    # Wait until the window is really there and has the focus.
-    for ($i = 0; $i -lt 40 -and -not $shell.AppActivate('Password test'); $i++) { Start-Sleep -Milliseconds 250 }
-    Start-Sleep -Milliseconds 1500
-    $null = $shell.AppActivate('Password test')
-    Start-Sleep -Milliseconds 700
+    # Wait (up to 30 s) until the password window is really in front.
+    for ($i = 0; $i -lt 60 -and [Kbd]::ForegroundTitle() -ne 'Password test'; $i++) {
+        $null = $shell.AppActivate('Password test')
+        Start-Sleep -Milliseconds 500
+    }
+    Start-Sleep -Milliseconds 800
+    if ([Kbd]::ForegroundTitle() -ne 'Password test') {
+        Stop-Process $form.Id -Force -ErrorAction SilentlyContinue
+        $line = "FAIL $kind password box: the test window never came to the front"
+        Write-Host $line; $script:summary += $line
+        return $false
+    }
     Type-Slowly 'hello @@wensday secret nesesary{SHIFT2}'
     Start-Sleep -Milliseconds 1200
     $got = if (Test-Path $out) { Get-Content $out -Raw } else { '(nothing typed)' }
