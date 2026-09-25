@@ -80,7 +80,7 @@ namespace SoundSpell
         void ApplyGlass()
         {
             int opacity = Prefs.GetNumber("GlassOpacity", 35);
-            bool blur = Prefs.Get("GlassBlur", true) && WindowsTransparencyOn;
+            bool blur = Prefs.Get("GlassBlur", true) && WindowsTransparencyOn && !BestPerformance;
             string key = opacity + "/" + blur + "/" + Theme.Back.ToArgb();
             if (key == glassFor) return;
             glassFor = key;
@@ -103,11 +103,26 @@ namespace SoundSpell
             }
         }
 
+        // The old Performance Options box set to "Adjust for best performance": Windows
+        // then may not draw blur even though Transparency effects says on.
+        public static bool BestPerformance
+        {
+            get
+            {
+                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"))
+                {
+                    object v = k == null ? null : k.GetValue("VisualFXSetting");
+                    try { return v != null && Convert.ToInt32(v) == 2; } catch (Exception) { return false; }
+                }
+            }
+        }
+
         // What the strip looks like with the current settings, for the settings window.
         public static string GlassDescription()
         {
             if (!Prefs.Get("GlassBlur", true)) return "See-through, no blur (frosted is switched off).";
             if (!WindowsTransparencyOn) return "See-through, no blur: Windows' Transparency effects are off (Settings, Accessibility, Visual effects).";
+            if (BestPerformance) return "See-through, no blur: Windows is set to 'Adjust for best performance' (Performance Options).";
             return "Frosted: what is behind is blurred and tinted.";
         }
 

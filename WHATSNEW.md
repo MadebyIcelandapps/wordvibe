@@ -3,6 +3,11 @@
 Each version's notes show in the update window. Newest first. Write them for her,
 in plain words, one line each.
 
+## 3.2.0
+- The glass slider now works on every computer. If Windows can't blur (for example when it's set to "Adjust for best performance"), the strip is see-through without the blur instead of solid.
+- Settings tells you which kind of glass the strip is using right now.
+- Password boxes are spotted more reliably in apps that are hard to read, and SoundSpell stays off until you really leave the password box.
+
 ## 3.1.0
 - The sentence strip is smaller and out of the way. In Settings you can choose its size, put it above or below your typing or at the bottom of the screen, and show it only when a word is red.
 - The strip is properly see-through now: a real frosted blur, 35% by default, with a slider in Settings.
