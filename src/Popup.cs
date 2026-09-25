@@ -66,9 +66,12 @@ namespace SoundSpell
             if (IsHandleCreated) Native.ShowWindow(Handle, 0); // SW_HIDE
         }
 
+        Point mouseWhenShown;
+
         public void ShowChoices(List<Suggestion> list, int current, string footer, Point at)
         {
             items = list; this.current = current; this.footer = footer; hover = -1;
+            mouseWhenShown = Control.MousePosition;
             if (font != null) { font.Dispose(); small.Dispose(); }
             font = Theme.Big(); small = Theme.Small();
             BackColor = Theme.Back;
@@ -111,6 +114,8 @@ namespace SoundSpell
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            // The list can pop up under a mouse that is not moving: that is not pointing.
+            if (Control.MousePosition == mouseWhenShown) return;
             int r = RowAt(e.Y);
             if (r != hover)
             {

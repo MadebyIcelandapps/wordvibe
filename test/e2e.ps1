@@ -135,10 +135,9 @@ $results = @(
     # Enter only fixes the word; the next Enter is a normal Enter.
     (Check 'hi @@wensday{ENTER}{ENTER}next' "hi Wednesday`nnext"),
     # Again a few times: this once came out wrong on one run (timing).
-    (Check 'hi @@wensday{ENTER}{ENTER}next' "hi Wednesday`nnext"),
-    (Check 'so @@nesesary{ENTER}{ENTER}yes' "so necessary`nyes"),
-    (Check 'hi @@wensday{ENTER}{ENTER}next' "hi Wednesday`nnext"),
-    (Check 'so @@nesesary{ENTER}{ENTER}yes' "so necessary`nyes"),
+    (Check 'so @@beleev{ENTER}{ENTER}yes' "so believe`nyes"),
+    (Check 'what a @@serprize{ENTER}{ENTER}ok' "what a surprise`nok"),
+    (Check 'the @@peepul{ENTER}{ENTER}here' "the people`nhere"),
     # Punctuation ends the word too; capitals carry over.
     (Check '@@Sykology.' "Psychology."),
     # Ctrl+0 puts back what was typed.

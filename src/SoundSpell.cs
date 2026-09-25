@@ -207,10 +207,18 @@ namespace SoundSpell
             });
             // The same fix three times: from now on it happens by itself.
             string key = Speller.Plain(typed);
-            if (Prefs.Get("AutoFix", true) && chosen != typed && !sp.IsWord(typed) && !autoFixes.ContainsKey(key)
-                && sp.Picked(typed, chosen) >= 3)
+            bool added = false;
+            lock (autoFixes)
             {
-                autoFixes[key] = chosen;
+                if (Prefs.Get("AutoFix", true) && chosen != typed && !sp.IsWord(typed) && !autoFixes.ContainsKey(key)
+                    && sp.Picked(typed, chosen) >= 3)
+                {
+                    autoFixes[key] = chosen;
+                    added = true;
+                }
+            }
+            if (added)
+            {
                 SaveAutoFixes();
                 Post(delegate
                 {
@@ -225,26 +233,31 @@ namespace SoundSpell
 
         void LoadAutoFixes()
         {
-            autoFixes.Clear();
+            var read = new Dictionary<string, string>(StringComparer.Ordinal);
             try
             {
-                if (!File.Exists(AutoFixPath)) return;
-                foreach (string line in File.ReadAllLines(AutoFixPath, Encoding.UTF8))
-                {
-                    string l = line.Trim();
-                    int eq = l.IndexOf('=');
-                    if (l.Length == 0 || l[0] == '#' || eq <= 0) continue;
-                    autoFixes[Speller.Plain(l.Substring(0, eq))] = l.Substring(eq + 1).Trim(); // empty: never fix this one
-                }
+                if (File.Exists(AutoFixPath))
+                    foreach (string line in File.ReadAllLines(AutoFixPath, Encoding.UTF8))
+                    {
+                        string l = line.Trim();
+                        int eq = l.IndexOf('=');
+                        if (l.Length == 0 || l[0] == '#' || eq <= 0) continue;
+                        read[Speller.Plain(l.Substring(0, eq))] = l.Substring(eq + 1).Trim(); // empty: never fix this one
+                    }
             }
             catch (IOException) { }
+            lock (autoFixes)
+            {
+                autoFixes.Clear();
+                foreach (var kv in read) autoFixes[kv.Key] = kv.Value;
+            }
         }
 
         void SaveAutoFixes()
         {
             var sb = new StringBuilder();
             sb.Append("# Words fixed by themselves as you type: typed=fixed. A line with nothing after = means never fix that word.\r\n");
-            foreach (var kv in autoFixes) sb.Append(kv.Key).Append('=').Append(kv.Value).Append("\r\n");
+            lock (autoFixes) foreach (var kv in autoFixes) sb.Append(kv.Key).Append('=').Append(kv.Value).Append("\r\n");
             try { File.WriteAllText(AutoFixPath, sb.ToString(), new UTF8Encoding(false)); } catch (IOException) { }
         }
 
@@ -253,12 +266,12 @@ namespace SoundSpell
             string fix;
             Speller sp = speller;
             if (sp == null || sp.IsWord(word)) return null; // never touch a real word
-            return autoFixes.TryGetValue(Speller.Plain(word), out fix) && fix.Length > 0 ? fix : null;
+            lock (autoFixes) return autoFixes.TryGetValue(Speller.Plain(word), out fix) && fix.Length > 0 ? fix : null;
         }
 
         public void RemoveAutoFix(string word)
         {
-            autoFixes[Speller.Plain(word)] = "";
+            lock (autoFixes) autoFixes[Speller.Plain(word)] = "";
             SaveAutoFixes();
         }
 

@@ -42,8 +42,12 @@ namespace SoundSpell
         readonly Native.LowLevelKeyboardProc proc, mouseProc;
         IntPtr hook = IntPtr.Zero, mouseHook = IntPtr.Zero;
         IntPtr lastWindow = IntPtr.Zero;
-        Popup popup;
-        SentenceStrip strip;
+        Popup popup;             // made and used on the app's window thread
+        SentenceStrip strip;     // same
+        // The hooks run on their own thread, so nothing on the window thread (voice,
+        // windows, settings) can ever hold up a key. All the typing state below lives
+        // on this thread; other threads hand work over with OnHook.
+        Control hookThread;
 
         // The last fix, which Ctrl+digit or a click can change while the popup is up.
         List<Suggestion> choices;
@@ -57,7 +61,7 @@ namespace SoundSpell
         string liveWord;
         List<Suggestion> liveFound;
         string liveFoundFor;
-        bool popupUp;
+        volatile bool popupUp;
 
         // Lookups run on a worker so typing never waits for them.
         readonly object lookupLock = new object();
@@ -91,21 +95,51 @@ namespace SoundSpell
 
         public void Start()
         {
-            hook = Native.SetWindowsHookEx(WH_KEYBOARD_LL, proc, Native.GetModuleHandle(null), 0);
-            mouseHook = Native.SetWindowsHookEx(WH_MOUSE_LL, mouseProc, Native.GetModuleHandle(null), 0);
+            var ready = new ManualResetEvent(false);
+            var t = new Thread(delegate ()
+            {
+                hookThread = new Control();
+                hookThread.CreateControl();
+                var h = hookThread.Handle;
+                hook = Native.SetWindowsHookEx(WH_KEYBOARD_LL, proc, Native.GetModuleHandle(null), 0);
+                mouseHook = Native.SetWindowsHookEx(WH_MOUSE_LL, mouseProc, Native.GetModuleHandle(null), 0);
+                ready.Set();
+                Application.Run(); // the message loop the hooks are called from
+            });
+            t.IsBackground = true;
+            t.SetApartmentState(ApartmentState.STA);
+            t.Name = "keys";
+            t.Start();
+            ready.WaitOne();
             foreach (ThreadStart work in new ThreadStart[] { LookupLoop, StripLoop })
             {
-                var t = new Thread(work);
-                t.IsBackground = true;
-                t.Start();
+                var w = new Thread(work);
+                w.IsBackground = true;
+                w.Start();
             }
         }
 
         public void Stop()
         {
-            if (hook != IntPtr.Zero) Native.UnhookWindowsHookEx(hook);
-            if (mouseHook != IntPtr.Zero) Native.UnhookWindowsHookEx(mouseHook);
-            hook = mouseHook = IntPtr.Zero;
+            if (hookThread == null) return;
+            try
+            {
+                hookThread.Invoke((Action)delegate
+                {
+                    if (hook != IntPtr.Zero) Native.UnhookWindowsHookEx(hook);
+                    if (mouseHook != IntPtr.Zero) Native.UnhookWindowsHookEx(mouseHook);
+                    hook = mouseHook = IntPtr.Zero;
+                    Application.ExitThread();
+                });
+            }
+            catch (Exception) { }
+        }
+
+        // Runs `a` on the hook thread, after the current hook call (if any) returns.
+        void OnHook(Action a)
+        {
+            try { if (hookThread != null && !hookThread.IsDisposed) hookThread.BeginInvoke(a); }
+            catch (InvalidOperationException) { }
         }
 
         // A click can move the text cursor, so whatever was being typed no longer counts
@@ -368,7 +402,7 @@ namespace SoundSpell
                 Speller sp = app.Speller;
                 if (word == null || sp == null) continue;
                 List<Suggestion> found = sp.SuggestFull(word, 5, previous);
-                app.Post(delegate
+                OnHook(delegate
                 {
                     if (word != liveWord || choices != null || found.Count == 0) return; // typing moved on
                     liveFound = found;
@@ -521,11 +555,10 @@ namespace SoundSpell
         }
 
         // A word on the strip was clicked: fix that one.
-        void OnStripWord(StripWord w)
+        void OnStripWord(StripWord w, Point below)
         {
             string text = recent.ToString();
             if (w.Start + w.Text.Length > text.Length || text.Substring(w.Start, w.Text.Length) != w.Text) return; // line changed
-            Point below = strip.Below(w);
             FixAt(w.Start, w.Text.Trim('\''), below);
         }
 
@@ -603,9 +636,9 @@ namespace SoundSpell
                 if (popup == null || popup.IsDisposed)
                 {
                     popup = new Popup();
-                    popup.TimedOut += delegate { CloseAll(); };
-                    popup.RowClicked += delegate (int r) { PickRow(r); };
-                    popup.RowPointed += delegate (int r) { if (app.HearOnPoint) HearRow(r); };
+                    popup.TimedOut += delegate { OnHook(CloseAll); };
+                    popup.RowClicked += delegate (int r) { OnHook(delegate { PickRow(r); }); };
+                    popup.RowPointed += delegate (int r) { if (app.HearOnPoint) OnHook(delegate { HearRow(r); }); };
                 }
                 popup.ShowChoices(list, current, footer, where);
             });
@@ -706,8 +739,15 @@ namespace SoundSpell
                     if (strip == null || strip.IsDisposed)
                     {
                         strip = new SentenceStrip();
-                        strip.WordClicked += OnStripWord;
-                        strip.SpeakerClicked += delegate { app.ReadAloud(CurrentSentence(), true); };
+                        strip.WordClicked += delegate (StripWord w)
+                        {
+                            Point below = strip.Below(w);
+                            OnHook(delegate { OnStripWord(w, below); });
+                        };
+                        strip.SpeakerClicked += delegate
+                        {
+                            OnHook(delegate { string s = CurrentSentence(); app.Post(delegate { app.ReadAloud(s, true); }); });
+                        };
                     }
                     if (words.Count == 0) { strip.HideNow(); return; }
                     strip.ShowWords(words, caret, exact);
@@ -736,7 +776,7 @@ namespace SoundSpell
         void SendLater(List<Native.INPUT> keys)
         {
             busy = true;
-            app.Post(delegate
+            OnHook(delegate
             {
                 try
                 {
@@ -760,7 +800,7 @@ namespace SoundSpell
             keys.Add(Key((ushort)'C', 0, 0));
             keys.Add(Key((ushort)'C', 0, Native.KEYEVENTF_KEYUP));
             keys.Add(Key((ushort)VK_LCONTROL, 0, Native.KEYEVENTF_KEYUP));
-            SendLater(keys);
+            OnHook(delegate { SendLater(keys); });
         }
 
         void ReplayQueued()

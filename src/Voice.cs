@@ -133,7 +133,7 @@ namespace SoundSpell
         static int generation;            // bumped by every Say/Stop; older speech gives up
         static SpeechSynthesizer sapi;
         static Prompt lastPrompt;
-        static SoundPlayer player;
+        static volatile SoundPlayer player;
         static Process piper;
         static string piperVoice;
         static bool piperSlow;
@@ -147,18 +147,21 @@ namespace SoundSpell
         {
             if (string.IsNullOrEmpty(text) || text.Trim().Length == 0) return;
             if (Log.On) Log.Write("speak: " + text);
-            int gen;
-            lock (gate) { gen = ++generation; }
-            StopPlaying();
-            var t = new Thread(delegate () { Speak(text.Trim(), gen); });
+            // Never waits: everything, even stopping what was said before, happens on
+            // a background thread (starting a voice the first time can take a while).
+            int gen = Interlocked.Increment(ref generation);
+            var t = new Thread(delegate () { StopPlaying(); Speak(text.Trim(), gen); });
             t.IsBackground = true;
             t.Start();
         }
 
         public static void Stop()
         {
-            lock (gate) { generation++; }
-            StopPlaying();
+            Interlocked.Increment(ref generation);
+            Speaking = false;
+            var t = new Thread(StopPlaying);
+            t.IsBackground = true;
+            t.Start();
         }
 
         static void StopPlaying()
@@ -168,7 +171,7 @@ namespace SoundSpell
             Speaking = false;
         }
 
-        static bool Current(int gen) { lock (gate) return gen == generation; }
+        static bool Current(int gen) { return gen == Thread.VolatileRead(ref generation); }
 
         static void Speak(string text, int gen)
         {
@@ -186,7 +189,8 @@ namespace SoundSpell
                         if (!Current(gen)) return;
                         using (var p = new SoundPlayer(wav))
                         {
-                            lock (gate) { if (!Current(gen)) return; player = p; }
+                            if (!Current(gen)) return;
+                            player = p;
                             p.PlaySync(); // Stop() from another thread ends this early
                         }
                         try { File.Delete(wav); } catch (Exception) { }
@@ -203,7 +207,7 @@ namespace SoundSpell
         {
             try
             {
-                lock (gate)
+                lock (gate) // only background speaking threads take this lock
                 {
                     if (!Current(gen)) return;
                     if (sapi == null)

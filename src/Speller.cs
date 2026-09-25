@@ -189,6 +189,11 @@ namespace SoundSpell
         {
             string t = Plain(typed);
             if (t.Length == 0 || chosen.Length == 0) return;
+            lock (picks) LearnLocked(t, chosen);
+        }
+
+        private void LearnLocked(string t, string chosen)
+        {
             Dictionary<string, int> m;
             if (!picks.TryGetValue(t, out m)) { m = new Dictionary<string, int>(StringComparer.Ordinal); picks[t] = m; }
             int n;
@@ -201,7 +206,7 @@ namespace SoundSpell
         {
             Dictionary<string, int> m;
             int n;
-            return picks.TryGetValue(Plain(typed), out m) && m.TryGetValue(chosen, out n) ? n : 0;
+            lock (picks) return picks.TryGetValue(Plain(typed), out m) && m.TryGetValue(chosen, out n) ? n : 0;
         }
 
         // Lines: typed<TAB>chosen<TAB>times
@@ -219,6 +224,7 @@ namespace SoundSpell
 
         public void SavePicks(TextWriter w)
         {
+            lock (picks)
             foreach (var t in picks)
                 foreach (var c in t.Value)
                     w.WriteLine(t.Key + "\t" + c.Key + "\t" + c.Value);
@@ -249,8 +255,12 @@ namespace SoundSpell
             double worstKept = double.MaxValue;
             int lenSlack = Math.Max(3, w.Length / 2 + 1);
 
-            Dictionary<string, int> before;
-            picks.TryGetValue(w, out before);
+            Dictionary<string, int> before = null;
+            lock (picks)
+            {
+                Dictionary<string, int> found;
+                if (picks.TryGetValue(w, out found)) before = new Dictionary<string, int>(found, StringComparer.Ordinal);
+            }
 
             for (int i = 0; i < words.Length; i++)
             {
