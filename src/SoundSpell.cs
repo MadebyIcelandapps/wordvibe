@@ -720,6 +720,26 @@ namespace SoundSpell
         [DllImport("user32.dll")] static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref CompositionData data);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
+        // Turns the blur off again. Always returns true.
+        public static bool ClearFrost(IntPtr hwnd)
+        {
+            try
+            {
+                var accent = new AccentPolicy { AccentState = 0 };
+                int size = Marshal.SizeOf(accent);
+                IntPtr mem = Marshal.AllocHGlobal(size);
+                try
+                {
+                    Marshal.StructureToPtr(accent, mem, false);
+                    var data = new CompositionData { Attribute = 19, Data = mem, SizeOfData = size };
+                    SetWindowCompositionAttribute(hwnd, ref data);
+                }
+                finally { Marshal.FreeHGlobal(mem); }
+            }
+            catch (EntryPointNotFoundException) { }
+            return true;
+        }
+
         // Tints the window with `tint` at `opacity`, and blurs what is behind it if
         // `blur`. Plain blur, not acrylic: Windows 11 acrylic adds a milky layer that
         // makes it far less see-through than the chosen opacity. Returns false where

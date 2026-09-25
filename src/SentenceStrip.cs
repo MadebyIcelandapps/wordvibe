@@ -30,7 +30,7 @@ namespace SoundSpell
     {
         readonly Timer idle = new Timer();
         string glassFor;       // the settings the glass was made with
-        bool layered;          // drawn as a see-through picture (no blur), see ApplyGlass
+        const bool layered = true; // always drawn as a see-through picture, see ApplyGlass
         public static int TestExtraWidth;   // the automatic checks add blank space to measure
         List<StripWord> words = new List<StripWord>();
         Rectangle speaker;
@@ -58,7 +58,7 @@ namespace SoundSpell
             {
                 var cp = base.CreateParams;
                 cp.ExStyle |= 0x08000000 | 0x00000080 | 0x00000008; // no-activate, tool window, topmost
-                if (layered) cp.ExStyle |= 0x00080000;                // WS_EX_LAYERED
+                cp.ExStyle |= 0x00080000;                               // WS_EX_LAYERED
                 return cp;
             }
         }
@@ -72,11 +72,12 @@ namespace SoundSpell
         // Frosted glass: what is behind is blurred and tinted at the chosen opacity
         // (35% by default). Re-made when the settings change.
         //
-        // Two ways to draw it:
-        // - Frosted: Windows blurs what is behind and tints it. Needs Windows'
-        //   "Transparency effects" to be on.
-        // - See-through: SoundSpell paints the tint itself as a picture with holes
-        //   in it (a layered window). No blur, but it works whatever Windows' setting.
+        // The strip always paints its own tint, at the chosen opacity, as a picture
+        // with see-through pixels (a layered window): measured to follow the slider on
+        // every Windows set-up. Where Windows can blur what is behind, that blur is
+        // added underneath (frosted); where it cannot, it is simply see-through.
+        // (Asking Windows to tint as well turned out to make the strip solid on some
+        // PCs, whatever the slider said.)
         void ApplyGlass()
         {
             int opacity = Prefs.GetNumber("GlassOpacity", 35);
@@ -84,9 +85,7 @@ namespace SoundSpell
             string key = opacity + "/" + blur + "/" + Theme.Back.ToArgb();
             if (key == glassFor) return;
             glassFor = key;
-            if (layered == blur) { layered = !blur; RecreateHandle(); Hwnd = Handle; }
-            glass = blur && Native.MakeFrosted(Handle, Theme.Back, opacity / 100f, true);
-            if (blur && !glass) { layered = true; RecreateHandle(); Hwnd = Handle; } // blur refused: paint it ourselves
+            glass = blur ? Native.MakeFrosted(Handle, Theme.Back, 0f, true) : Native.ClearFrost(Handle) && false;
             if (Log.On) Log.Write("strip glass: " + (glass ? "frosted" : "see-through, no blur") + ", opacity " + opacity + "%");
         }
 
@@ -195,17 +194,13 @@ namespace SoundSpell
                 if (below && y + h > screen.Bottom) y = caret.Top - h - 4;
             }
             x = Math.Max(screen.Left + 4, Math.Min(x, screen.Right - w - 4));
-            if (layered)
-            {
-                RenderLayered(x, y, w, h);
-                Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040); // TOPMOST, NOSIZE|NOMOVE|NOACTIVATE|SHOW
-            }
-            else Native.SetWindowPos(Handle, new IntPtr(-1), x, y, w, h, 0x0010 | 0x0040); // TOPMOST, NOACTIVATE | SHOWWINDOW
+            RenderLayered(x, y, w, h);
+            Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040); // TOPMOST, NOSIZE|NOMOVE|NOACTIVATE|SHOW
             if (Log.On)
             {
                 var sb = new System.Text.StringBuilder();
                 foreach (StripWord sw in words) sb.Append(sw.Text).Append('=').Append(sw.State).Append(' ');
-                Log.Write("strip at " + x + "," + y + "," + w + "," + h + " glass=" + (glass || layered) + " mode=" + (layered ? "layered" : "frosted") + " words: " + sb);
+                Log.Write("strip at " + x + "," + y + "," + w + "," + h + " glass=" + (glass || layered) + " mode=" + (glass ? "frosted" : "layered") + " words: " + sb);
             }
             Invalidate();
             Update();
@@ -238,7 +233,7 @@ namespace SoundSpell
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            if (layered) return; // drawn by RenderLayered
+            return; // drawn by RenderLayered
             var g = e.Graphics;
             // On glass, see-through pixels show the blur, tinted by Windows.
             if (glass) g.Clear(Color.Transparent);
