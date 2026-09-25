@@ -22,7 +22,9 @@ cmd.exe /c "schtasks /Query /TN SoundSpell >nul 2>&1"
 $adminMode = $LASTEXITCODE -eq 0
 
 if (-not $adminMode) {
-    Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name SoundSpell -Value "`"$exe`""
+    $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    if (-not (Test-Path $run)) { New-Item $run | Out-Null }   # missing on a brand-new account
+    Set-ItemProperty $run -Name SoundSpell -Value "`"$exe`""
 }
 
 # Start menu shortcut.
