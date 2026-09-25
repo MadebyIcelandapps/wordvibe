@@ -79,6 +79,7 @@ namespace SoundSpell
         // True while the text cursor is in a password field. Then SoundSpell does
         // nothing at all: no strip, no list, no fixes, nothing remembered or logged.
         volatile bool passwordFocus;
+        readonly AutoResetEvent focusWake = new AutoResetEvent(false);
 
         // Shortcut taps: a key pressed and let go with nothing else in between.
         bool shiftClean, rctrlClean, lctrlClean;
@@ -117,7 +118,7 @@ namespace SoundSpell
             t.Start();
             ready.WaitOne();
             WatchFocus();
-            foreach (ThreadStart work in new ThreadStart[] { LookupLoop, StripLoop })
+            foreach (ThreadStart work in new ThreadStart[] { LookupLoop, StripLoop, FocusLoop })
             {
                 var w = new Thread(work);
                 w.IsBackground = true;
@@ -163,6 +164,34 @@ namespace SoundSpell
             t.IsBackground = true;
             t.SetApartmentState(ApartmentState.MTA);
             t.Start();
+        }
+
+        // Asks UI Automation whether the focused element is a password field. Only
+        // called on background threads: it goes into the other app and can be slow.
+        static bool FocusIsPassword()
+        {
+            try
+            {
+                AutomationElement el = AutomationElement.FocusedElement;
+                return el != null && el.Current.IsPassword;
+            }
+            catch (Exception) { return false; }
+        }
+
+        // Checks again after keys, as focus events can come late or not at all.
+        void FocusLoop()
+        {
+            while (true)
+            {
+                focusWake.WaitOne();
+                bool pw = FocusIsPassword();
+                if (pw != passwordFocus)
+                {
+                    passwordFocus = pw;
+                    if (Log.On) Log.Write(pw ? "focus: password field" : "focus: not a password field");
+                    if (pw) OnHook(ForgetForPassword);
+                }
+            }
         }
 
         void ForgetForPassword()
@@ -319,6 +348,7 @@ namespace SoundSpell
 
         bool OnKeyDown(int vk, int scan)
         {
+            focusWake.Set();
             if (IsModifier(vk)) return false;
             if (InPassword)
             {
@@ -476,7 +506,8 @@ namespace SoundSpell
                 string word, previous;
                 lock (lookupLock) { word = lookupWanted; previous = lookupPrevious; lookupWanted = null; }
                 Speller sp = app.Speller;
-                if (word == null || sp == null) continue;
+                if (word == null || sp == null || passwordFocus) continue;
+                if (FocusIsPassword()) { passwordFocus = true; OnHook(ForgetForPassword); continue; }
                 List<Suggestion> found = sp.SuggestFull(word, 5, previous);
                 OnHook(delegate
                 {
@@ -794,6 +825,12 @@ namespace SoundSpell
                 string text; int version;
                 lock (stripLock) { text = stripText; version = stripVersion; }
                 if (text == null || passwordFocus) continue;
+                if (FocusIsPassword())
+                {
+                    passwordFocus = true;
+                    OnHook(ForgetForPassword);
+                    continue;
+                }
                 List<StripWord> words = SentenceWords(text, app.Speller);
                 bool exact;
                 Rectangle caret = Caret.Find(out exact);

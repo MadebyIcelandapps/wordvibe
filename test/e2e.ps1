@@ -147,7 +147,9 @@ function PasswordCheck([string]$kind) {
     Remove-Item $out -ErrorAction SilentlyContinue
     $logStart = (Get-Content $env:SOUNDSPELL_LOG).Count
     $form = Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSScriptRoot\password-form.ps1`"", $kind, "`"$out`"" -PassThru
-    Start-Sleep -Seconds 5
+    # Wait until the window is really there and has the focus.
+    for ($i = 0; $i -lt 40 -and -not $shell.AppActivate('Password test'); $i++) { Start-Sleep -Milliseconds 250 }
+    Start-Sleep -Milliseconds 1500
     $null = $shell.AppActivate('Password test')
     Start-Sleep -Milliseconds 700
     Type-Slowly 'hello @@wensday secret nesesary{SHIFT2}'
