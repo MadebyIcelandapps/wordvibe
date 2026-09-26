@@ -110,7 +110,7 @@ function StripCheck {
         $avg = [int]($sum / $n)
         $info = "strip ${w}x${h} glass=$glass red=$red green=$green brightness=$avg words: $words"
         Write-Host $info
-        $ok = ($words -match 'nesesary=Bad') -and ($words -match 'went=Good') -and $red -gt 5 -and $green -gt 5 -and $avg -gt 90 -and $h -le 32
+        $ok = ($words -match 'nesesary=Bad') -and ($words -match 'went=Good') -and $red -gt 5 -and $green -lt 5 -and $avg -gt 90 -and $h -le 32
 
         # Click the speaker: it reads the sentence and the strip stays up.
         $before = (Get-Content $env:SOUNDSPELL_LOG).Count
@@ -123,7 +123,7 @@ function StripCheck {
         $ok = $ok -and $spoke -and -not $hid
     }
     Stop-Process $np.Id -Force
-    $line2 = if ($ok) { "ok   strip shows green and red ($info)" } else { "FAIL strip ($info) [$line]" }
+    $line2 = if ($ok) { "ok   strip shows red only for the word to check ($info)" } else { "FAIL strip ($info) [$line]" }
     Write-Host $line2; $script:summary += $line2
     return $ok
 }

@@ -26,7 +26,6 @@ The list closes as soon as you keep typing, click somewhere else, or switch wind
 
 **The sentence strip.** While you type, a frosted-glass strip sits just above your words and shows the sentence so far:
 
-- a soft **green** behind words that are spelled right
 - a soft **red** behind words to check
 
 Click a red word to see its matches, or tap Shift twice to fix the nearest red one. The 🔊 button reads the sentence out. Names it doesn't know (a capital in the middle of a sentence) stay plain, and any unknown word can be added to *My words* from its list.

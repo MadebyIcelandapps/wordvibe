@@ -34,7 +34,7 @@ namespace SoundSpell
             Note("Type a word the way it sounds, then use the shortcut. @@word works too.");
             Check("Put in the first match by itself (off: only show the list)", Prefs.Get("AutoReplace", true),
                 delegate (bool v) { Prefs.Set("AutoReplace", v); app.Apply(); });
-            Check("Show the sentence strip while I type (green: right, red: check it)", Prefs.Get("Strip", true),
+            Check("Show the sentence strip while I type (words to check are red)", Prefs.Get("Strip", true),
                 delegate (bool v) { Prefs.Set("Strip", v); app.Apply(); });
             Choice("    Strip size:", SentenceStrip.Sizes, Prefs.GetText("StripSize", SentenceStrip.Sizes[0]),
                 delegate (string v) { Prefs.SetText("StripSize", v); });

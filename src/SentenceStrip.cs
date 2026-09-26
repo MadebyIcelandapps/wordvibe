@@ -283,10 +283,9 @@ namespace SoundSpell
                 foreach (StripWord w in words)
                 {
                     if (w.Box.IsEmpty) continue;
-                    Color tint = w.State == WordState.Good ? Color.FromArgb(110, 76, 175, 80)
-                               : w.State == WordState.Bad ? Color.FromArgb(140, 229, 57, 53)
-                               : Color.FromArgb(40, Theme.Dim);
-                    using (var b = new SolidBrush(tint)) Fill(g, b, w.Box, 7);
+                    // Only words to check are marked (red); the rest are plain text.
+                    if (w.State == WordState.Bad)
+                        using (var b = new SolidBrush(Color.FromArgb(140, 229, 57, 53))) Fill(g, b, w.Box, 7);
                     if (w.State == WordState.Bad)
                         using (var pen = new Pen(Color.FromArgb(220, 198, 40, 40), 2f))
                             g.DrawLine(pen, w.Box.Left + 5, w.Box.Bottom - 3, w.Box.Right - 5, w.Box.Bottom - 3);
