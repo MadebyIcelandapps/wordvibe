@@ -45,6 +45,7 @@ Right-click the SoundSpell icon by the clock (under the **^** arrow) and choose 
 - **Shortcut:** Tap Shift twice, Ctrl+Space, Tap right Ctrl, or None (then use `@@` only)
 - **Put in the first match by itself**, or only show the list
 - **Show the sentence above what I type** (the strip) and **fix my usual mistakes by themselves**
+- **The strip:** size, where it sits, when it shows, and what it shows (the whole sentence, or only the words to check)
 - **Voice:** the Windows voice, or a natural voice (downloads once), with a sample button, plus voice speed
 - **Read the fixed word out loud**, **read a match when I point at it**, and **tap Ctrl twice to hear the selected text**
 - **Text size**, **colours** (cream, pale yellow, light blue, white, dark) and **font** (Verdana, OpenDyslexic if installed, Comic Sans MS, Tahoma, Arial), with a preview

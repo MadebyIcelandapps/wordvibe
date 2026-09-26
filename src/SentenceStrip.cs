@@ -1,7 +1,7 @@
-// The sentence strip: a frosted-glass bar just above the text being typed that
-// shows the sentence so far, with a soft green behind words that are spelled
-// right and a soft red behind ones to check. Click a red word to fix it; click
-// the speaker to hear the sentence. It never takes focus from the app.
+// The sentence strip: a see-through bar just above the text being typed that
+// shows the sentence so far (or only the words to check), with a soft red behind
+// words to check. Click a red word to fix it; click the speaker to hear the
+// sentence. It never takes focus from the app.
 //
 // Written for C# 5 so the csc.exe that ships inside Windows can compile it.
 
@@ -154,6 +154,7 @@ namespace SoundSpell
         public static readonly string[] Sizes = { "Small", "Medium", "Large" };
         public static readonly string[] Places = { "Just above my typing", "Just below my typing", "Bottom of the screen" };
         public static readonly string[] Shows = { "Always while I type", "Only when a word needs a look" };
+        public static readonly string[] Contents = { "The whole sentence", "Only words to check" };
 
         // Shows `list` just above `caret` (screen coordinates).
         public void ShowWords(List<StripWord> list, Rectangle caret, bool exact)

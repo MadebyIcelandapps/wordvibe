@@ -42,6 +42,8 @@ namespace SoundSpell
                 delegate (string v) { Prefs.SetText("StripPlace", v); });
             Choice("    Show it:", SentenceStrip.Shows, Prefs.GetText("StripShow", SentenceStrip.Shows[0]),
                 delegate (string v) { Prefs.SetText("StripShow", v); });
+            Choice("    Show on it:", SentenceStrip.Contents, Prefs.GetText("StripContent", SentenceStrip.Contents[0]),
+                delegate (string v) { Prefs.SetText("StripContent", v); });
             Slider("    Glass opacity:", 10, 90, Prefs.GetNumber("GlassOpacity", 35), "%",
                 delegate (int v) { Prefs.SetNumber("GlassOpacity", v); });
             Check("    Try frosted blur (on some PCs this makes the strip solid)", Prefs.Get("GlassBlur", false),

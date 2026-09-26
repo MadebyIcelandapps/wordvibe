@@ -916,6 +916,9 @@ namespace SoundSpell
                     bool onlyRed = Prefs.GetText("StripShow", SentenceStrip.Shows[0]) == SentenceStrip.Shows[1];
                     bool anyRed = false;
                     foreach (StripWord sw in words) if (sw.State == WordState.Bad) anyRed = true;
+                    // "Only words to check": the strip holds just the red words.
+                    if (Prefs.GetText("StripContent", SentenceStrip.Contents[0]) == SentenceStrip.Contents[1])
+                        words = words.FindAll(delegate (StripWord sw) { return sw.State == WordState.Bad; });
                     if (words.Count == 0 || (onlyRed && !anyRed)) { strip.HideNow(); return; }
                     strip.ShowWords(words, caret, exact);
                 });

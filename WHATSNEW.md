@@ -5,6 +5,7 @@ in plain words, one line each.
 
 ## 3.2.1
 - The strip only marks words to check, in red. Words spelled right are plain, so it is calmer to look at.
+- New in Settings, "Show on it": the whole sentence, or only the words to check. With "Show it: only when a word needs a look" as well, the strip becomes a small red tag that only pops up when something is misspelled.
 
 ## 3.2.0
 - The glass slider now really works: the strip is see-through by the amount you choose. (Before, it could look solid whatever the slider said.)
