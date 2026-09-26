@@ -59,6 +59,16 @@ static class SpellTest
         good &= Expect("there after 'over'", First(sp.SuggestFull("there", 5, "over")), "there");
         good &= Expect("thair after 'love'", First(sp.SuggestFull("thair", 5, "love")), "their");
         good &= Expect("youre", First(sp.SuggestFull("youre", 5, null)), "you're");
+        // Contractions typed without the apostrophe.
+        good &= Expect("im", First(sp.SuggestFull("im", 5, null)), "I'm");
+        good &= Expect("Im", First(sp.SuggestFull("Im", 5, null)), "I'm");
+        good &= Expect("dont", First(sp.SuggestFull("dont", 5, null)), "don't");
+        good &= Expect("cant", First(sp.SuggestFull("cant", 5, null)), "can't");
+        good &= Expect("ive", First(sp.SuggestFull("ive", 5, null)), "I've");
+        good &= Expect("ill offers I'll second", sp.SuggestFull("ill", 5, null)[1].Word, "I'll");
+        good &= Expect("its offers it's second", sp.SuggestFull("its", 5, null)[1].Word, "it's");
+        foreach (Suggestion s in sp.SuggestFull("cant", 8, null))
+            good &= Expect("no slur for cant", s.Word == "cunt" ? "slur" : "ok", "ok");
         good &= Expect("wether after 'the'", First(sp.SuggestFull("wether", 5, "the")), "weather");
         good &= Expect("meaning shown", sp.SuggestFull("there", 5, null)[0].Meaning != null ? "yes" : "no", "yes");
 

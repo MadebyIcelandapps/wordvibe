@@ -165,6 +165,72 @@ namespace SoundSpell
             "c'mon", "'cause", "'til", "d'you",
         };
 
+        // Contractions typed without the apostrophe ("im", "dont") and what they stand
+        // for. Leading-apostrophe ones ('cause, 'til) are left out: "cause" is a word.
+        static readonly string[] ContractionMeanings = {
+            "I'm=I am", "you're=you are", "we're=we are", "they're=they are", "it's=it is", "that's=that is",
+            "there's=there is", "here's=here is", "what's=what is", "who's=who is", "where's=where is",
+            "how's=how is", "let's=let us", "he's=he is", "she's=she is", "don't=do not", "doesn't=does not",
+            "didn't=did not", "can't=cannot", "couldn't=could not", "won't=will not", "wouldn't=would not",
+            "shouldn't=should not", "isn't=is not", "aren't=are not", "wasn't=was not", "weren't=were not",
+            "haven't=have not", "hasn't=has not", "hadn't=had not", "mustn't=must not", "needn't=need not",
+            "I've=I have", "you've=you have", "we've=we have", "they've=they have", "could've=could have",
+            "would've=would have", "should've=should have", "might've=might have", "must've=must have",
+            "I'd=I would", "you'd=you would", "he'd=he would", "she'd=she would", "we'd=we would",
+            "they'd=they would", "it'd=it would", "that'd=that would", "who'd=who would", "I'll=I will",
+            "you'll=you will", "he'll=he will", "she'll=she will", "we'll=we will", "they'll=they will",
+            "it'll=it will", "that'll=that will", "there'll=there will", "ain't=is not", "y'all=you all",
+            "o'clock=on the hour", "ma'am=madam", "c'mon=come on", "d'you=do you",
+        };
+
+        // Real words that are nearly always a contraction missing its apostrophe,
+        // so the contraction goes first for them too ("cant" -> "can't").
+        static readonly HashSet<string> MostlyContraction = new HashSet<string>(StringComparer.Ordinal) {
+            "cant", "wont", "hes", "shes",
+        };
+
+        static Dictionary<string, string[]> contractionFor;
+
+        // "im" -> {"I'm", "I am"}, or null.
+        static string[] ContractionFor(string plain)
+        {
+            if (contractionFor == null)
+            {
+                var m = new Dictionary<string, string[]>(StringComparer.Ordinal);
+                foreach (string pair in ContractionMeanings)
+                {
+                    int eq = pair.IndexOf('=');
+                    string word = pair.Substring(0, eq);
+                    m[Plain(word)] = new[] { word, pair.Substring(eq + 1) };
+                }
+                contractionFor = m;
+            }
+            string[] found;
+            return contractionFor.TryGetValue(plain, out found) ? found : null;
+        }
+
+        // Puts the contraction she most likely meant into the list: first if what she
+        // typed is not a word ("im", "dont") or nearly always means it ("cant"),
+        // otherwise second ("its" -> its, it's; "ill" -> ill, I'll).
+        private void AddContraction(List<Suggestion> result, string typed, string plain)
+        {
+            string[] c = ContractionFor(plain);
+            if (c == null) return;
+            result.RemoveAll(delegate (Suggestion s) { return string.Equals(s.Word, c[0], StringComparison.OrdinalIgnoreCase); });
+            bool first = !index.ContainsKey(plain) || MostlyContraction.Contains(plain);
+            if (!first)
+            {
+                // What she picked before wins.
+                lock (picks)
+                {
+                    Dictionary<string, int> m;
+                    int n;
+                    if (picks.TryGetValue(plain, out m) && m.TryGetValue(c[0], out n) && n > 0) first = true;
+                }
+            }
+            result.Insert(first || result.Count == 0 ? 0 : 1, new Suggestion(c[0], c[1]));
+        }
+
         // True if the word is in the dictionary (either US or UK spelling), is one of
         // her own words, is a contraction like "don't", or is a word plus 's.
         public bool IsWord(string word)
@@ -265,6 +331,7 @@ namespace SoundSpell
             for (int i = 0; i < words.Length; i++)
             {
                 string cand = words[i];
+                if (NeverSuggest.Contains(cand) && cand != w) continue;
                 int picked = 0;
                 if (before != null) before.TryGetValue(display[i], out picked);
                 if (picked == 0 && Math.Abs(cand.Length - w.Length) > lenSlack + 2) continue;
@@ -307,10 +374,18 @@ namespace SoundSpell
                 result.Add(new Suggestion(typed, "your spelling"));
 
             result = Homophones.Expand(result, w, Plain(previous ?? ""), max + 2);
+            AddContraction(result, typed, w);
 
             foreach (Suggestion s in result) s.Word = MatchCase(typed, s.Word);
             return result;
         }
+
+        // Slurs and the worst words are never offered as a match for something else
+        // (a plain "cant" once suggested one). They still count as spelled right.
+        static readonly HashSet<string> NeverSuggest = new HashSet<string>(StringComparer.Ordinal) {
+            "cunt", "nigger", "nigga", "fag", "faggot", "retard", "retarded", "slut", "whore", "twat", "spastic",
+            "spaz", "tranny", "paki", "chink", "kike", "wank", "wanker", "dyke",
+        };
 
         private static bool Has(List<Suggestion> list, string word)
         {

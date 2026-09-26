@@ -3,6 +3,11 @@
 Each version's notes show in the update window. Newest first. Write them for her,
 in plain words, one line each.
 
+## 3.2.2
+- Short words without the apostrophe are fixed properly: im becomes I'm, dont becomes don't, cant becomes can't, ive becomes I've. Each one shows what it means (I am, do not).
+- Words that are real but might be missing an apostrophe (its, ill, were) now offer it's, I'll and we're as well.
+- Rude words are never offered as a match for something else.
+
 ## 3.2.1
 - The strip only marks words to check, in red. Words spelled right are plain, so it is calmer to look at.
 - New in Settings, "Show on it": the whole sentence, or only the words to check. With "Show it: only when a word needs a look" as well, the strip becomes a small red tag that only pops up when something is misspelled.

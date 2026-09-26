@@ -13,7 +13,7 @@ namespace SoundSpell
 {
     static class Updater
     {
-        public const string Version = "3.2.1";
+        public const string Version = "3.2.2";
         const string VersionUrl = "https://raw.githubusercontent.com/MadebyIcelandapps/wordvibe/main/VERSION";
 
         // The newest version on GitHub, or null if it could not be reached.
